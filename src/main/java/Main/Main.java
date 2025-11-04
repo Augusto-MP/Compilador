@@ -3,6 +3,7 @@ package Main;
 import java.io.IOException;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
+import compiler.MyCVisitor;
 
 // Importa as classes do nosso novo pacote 'gen'
 import gen.CLexer;
@@ -37,6 +38,12 @@ public class Main {
 
             // Inicia a análise pela regra 'program' e obtém a árvore
             ParseTree tree = parser.program();
+
+            // Cria uma instância do nosso Visitor
+            MyCVisitor visitor = new MyCVisitor();
+
+            // Inicia a caminhada pela árvore a partir do nó raiz ('tree')
+            visitor.visit(tree);
 
             // Se chegámos aqui, a análise sintática foi bem-sucedida
             System.out.println("Parsing completed successfully.");
