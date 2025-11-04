@@ -65,6 +65,34 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         return null; // Não retorna tipo
     }
+    
+    /**
+     * Método chamado ao encontrar uma atribuição (ex: x = 10;)
+     * A regra na gramática é: assignment: unaryExpr '=' expr ';'
+     */
+    @Override
+    public Type visitAssignment(CParser.AssignmentContext ctx) {
+        
+        // 1. Visitar o lado esquerdo (LHS) da atribuição e obter o seu tipo.
+        //    Na nossa gramática, o LHS é um 'unaryExpr'.
+        Type lhsType = visit(ctx.unaryExpr());
+
+        // 2. Visitar o lado direito (RHS) da atribuição e obter o seu tipo.
+        //    Na nossa gramática, o RHS é uma 'expr'.
+        Type rhsType = visit(ctx.expr());
+
+        // 3. Comparar os tipos.
+        //    (Ignoramos se algum tipo for 'error', pois já reportámos esse erro)
+        if (lhsType != null && rhsType != null && 
+            !lhsType.name.equals("error") && !rhsType.name.equals("error")) 
+        {
+            if (!lhsType.equals(rhsType)) {
+                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + rhsType.name + " a " + lhsType.name);
+            }
+        }
+
+        return null; // Atribuição é um 'statement', não retorna tipo.
+    }
 
     @Override
     public Type visitPrimary(CParser.PrimaryContext ctx) {
