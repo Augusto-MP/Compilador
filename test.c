@@ -1,12 +1,21 @@
-// O nosso ficheiro de teste atualizado
 #include <stdio.h>
 
 int main() {
-    int x = 10;
-    int z = x; // Caso de SUCESSO: 'x' foi declarada.
-    int w = y; // Caso de ERRO: 'y' não foi declarada.
+    // Teste 1: SUCESSO (função 'int' a retornar 'int')
+    return 0; 
 }
 
 void outraFuncao() {
-    // Esta é outra função
+    // Teste 2: SUCESSO (função 'void' a retornar 'void')
+    return;
+}
+
+int funcaoErrada1() {
+    // Teste 3: ERRO (função 'int' a tentar retornar 'float')
+    return 5.5; 
+}
+
+void funcaoErrada2() {
+    // Teste 4: ERRO (função 'void' a tentar retornar 'int')
+    return 10;
 }
