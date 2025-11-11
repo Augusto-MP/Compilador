@@ -1,21 +1,19 @@
 #include <stdio.h>
 
 int main() {
-    // Teste 1: SUCESSO (função 'int' a retornar 'int')
-    return 0; 
+    int arr[5];
+    int x = 10;
+    float y = 0.0;
+    int w;
+
+    // 1. Teste de SUCESSO: Acesso a array com índice int
+    w = arr[0];
+
+    // 2. Teste de ERRO: Acesso a não-array
+    w = x[0];
+
+    // 3. Teste de ERRO: Acesso a array com índice float
+    w = arr[y];
 }
 
-void outraFuncao() {
-    // Teste 2: SUCESSO (função 'void' a retornar 'void')
-    return;
-}
-
-int funcaoErrada1() {
-    // Teste 3: ERRO (função 'int' a tentar retornar 'float')
-    return 5.5; 
-}
-
-void funcaoErrada2() {
-    // Teste 4: ERRO (função 'void' a tentar retornar 'int')
-    return 10;
-}
+void outraFuncao() {}
