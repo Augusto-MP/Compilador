@@ -69,23 +69,75 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     }
 
     @Override
+    public Type visitStructDeclaration(CParser.StructDeclarationContext ctx) {
+        String structName = ctx.ID().getText();
+        String typeName = "struct " + structName;
+
+        // 1. Criar o Tipo da Struct e a sua tabela de membros
+        Type structType = new Type(typeName);
+        structType.members = new SymbolTable(null); 
+
+        // 2. Mudar temporariamente o escopo atual para a tabela de membros
+        //    Assim, as declarações dentro da struct (int x;) ficam guardadas nela.
+        SymbolTable previousScope = this.currentScope;
+        this.currentScope = structType.members;
+
+        // 3. Visitar todas as declarações dentro da struct
+        for (CParser.DeclarationContext decl : ctx.declaration()) {
+            visit(decl);
+        }
+
+        // 4. Restaurar o escopo anterior
+        this.currentScope = previousScope;
+
+        // 5. Registar o tipo da struct no escopo atual (global)
+        //    Guardamos como um Símbolo para que 'visitDeclaration' o encontre depois.
+        this.currentScope.put(typeName, new Symbol(typeName, structType));
+        
+        System.out.println("Definição de struct registada: " + typeName);
+
+        return null;
+    }
+
+    @Override
     public Type visitDeclaration(CParser.DeclarationContext ctx) {
-        // ... (código existente sem alterações)
         String typeName = ctx.type().getText();
         String varName = ctx.ID().getText();
+        boolean isArray = false;
+
+        // Verifica se é array
         if (ctx.INT() != null && !ctx.INT().isEmpty()) {
             typeName += "[]";
+            isArray = true;
         }
-        Type varType = new Type(typeName);
+        
+        Type varType;
+
+        // NOVO: Tentar recuperar o tipo da Tabela de Símbolos
+        // Se for 'struct Ponto', queremos o objeto Type que já tem os 'members' preenchidos.
+        Symbol typeSymbol = this.currentScope.get(typeName);
+        
+        if (typeSymbol != null && !isArray) {
+            // Encontrámos a definição da struct! Usamos esse Type especial.
+            varType = typeSymbol.type;
+        } else {
+            // É um tipo primitivo (int) ou um array (que tratamos de forma simples por enquanto)
+            varType = new Type(typeName);
+        }
+
         Symbol varSymbol = new Symbol(varName, varType);
         this.currentScope.put(varName, varSymbol);
-        System.out.println("   Registrando nova variável no escopo local: " + varSymbol);
+        
+        System.out.println("   Registando variável: " + varName + " (" + typeName + ")");
+
+        // Verificação de inicialização
         if (ctx.expr() != null) {
             Type exprType = visit(ctx.expr());
             if (exprType != null && !exprType.name.equals("error") && !varType.equals(exprType)) {
                 System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + exprType.name + " a " + varType.name);
             }
         }
+
         return null;
     }
 
@@ -111,42 +163,25 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         Type primaryType = visit(ctx.primary());
         String primaryName = ctx.primary().getText();
 
-        // --- INÍCIO DA NOVA LÓGICA DE ARRAY ---
-
-        // 1. Verificar se é um acesso a array (ex: arr[i])
+        // 1. Acesso a Array
         if (ctx.expr() != null && !ctx.expr().isEmpty()) {
-            
-            // 1a. O 'primary' deve ser um array.
-            //     Vamos verificar se o seu tipo termina em "[]"
             if (!primaryType.name.endsWith("[]")) {
                 System.err.println("ERRO SEMÂNTICO: A variável '" + primaryName + "' não é um array e não pode ser acedida com [].");
                 return new Type("error");
             }
-
-            // 1b. A expressão dentro dos colchetes (o índice) deve ser um 'int'
-            Type indexType = visit(ctx.expr(0)); // Visita a expressão do índice
+            Type indexType = visit(ctx.expr(0));
             if (indexType != null && !indexType.name.equals("int") && !indexType.name.equals("error")) {
                 System.err.println("ERRO SEMÂNTICO: O índice do array '" + primaryName + "' deve ser um 'int', mas é '" + indexType.name + "'.");
                 return new Type("error");
             }
-
-            // 1c. O tipo resultante é o tipo base do array
-            //     Ex: Se primaryType for "int[]", o tipo resultante é "int"
             String baseTypeName = primaryType.name.replace("[]", "");
             return new Type(baseTypeName);
         }
-        
-        // --- FIM DA NOVA LÓGICA DE ARRAY ---
 
-
-        // Lógica de chamada de função (que já tínhamos)
+        // 2. Chamada de Função
         if (!ctx.argumentList().isEmpty()) {
-            
             Symbol functionSymbol = this.currentScope.get(primaryName);
-
-            if (functionSymbol == null) {
-                return new Type("error");
-            }
+            if (functionSymbol == null) { return new Type("error"); } // Já reportado no visitPrimary
 
             if (!functionSymbol.isFunction()) {
                 System.err.println("ERRO SEMÂNTICO: '" + primaryName + "' não é uma função e não pode ser chamada.");
@@ -172,7 +207,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             for (int i = 0; i < actualParams.size(); i++) {
                 Type expectedType = expectedParams.get(i);
                 Type actualType = visit(actualParams.get(i));
-
                 if (actualType != null && !actualType.name.equals("error")) {
                     if (!expectedType.equals(actualType)) {
                         System.err.println("ERRO SEMÂNTICO: Argumento " + (i+1) + " da função '" + primaryName + 
@@ -180,14 +214,34 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                     }
                 }
             }
-            
             return functionSymbol.type;
         }
 
-        // Se não for chamada de função nem acesso a array...
+        // 3. NOVO: Acesso a Membro de Struct (ex: p.x)
+        if (!ctx.ID().isEmpty()) {
+            // Obtém o nome do campo (o ID após o ponto)
+            String memberName = ctx.ID(0).getText();
+
+            // Verifica se a variável principal é uma struct (tem tabela de membros?)
+            if (primaryType.members == null) {
+                System.err.println("ERRO SEMÂNTICO: A variável '" + primaryName + "' (" + primaryType.name + ") não é uma struct/union, não pode aceder a '" + memberName + "'.");
+                return new Type("error");
+            }
+
+            // Verifica se o campo existe na struct
+            Symbol member = primaryType.members.get(memberName);
+            if (member == null) {
+                System.err.println("ERRO SEMÂNTICO: O campo '" + memberName + "' não existe em '" + primaryType.name + "'.");
+                return new Type("error");
+            }
+
+            // Retorna o tipo do campo (ex: int)
+            return member.type;
+        }
+
         return primaryType;
     }
-    
+
     @Override
     public Type visitPrimary(CParser.PrimaryContext ctx) {
         // ... (código existente sem alterações)
