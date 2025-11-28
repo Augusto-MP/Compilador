@@ -39,6 +39,7 @@
         </executions>
         <configuration>
           <visitor>true</visitor>
+          <packageName>gen</packageName>
         </configuration>
       </plugin>
       
