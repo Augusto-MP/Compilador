@@ -39,7 +39,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         
         Symbol functionSymbol = new Symbol(functionName, functionType, paramTypes);
         this.currentScope.put(functionName, functionSymbol);
-        System.out.println("Registando nova função no escopo: " + functionSymbol);
+        System.out.println("Registrando nova função no escopo: " + functionSymbol);
 
         Symbol oldFunction = this.currentFunction;
         this.currentFunction = functionSymbol;      
@@ -75,15 +75,44 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         // 4. Restaurar o escopo anterior
         this.currentScope = previousScope;
 
-        // 5. Registar o tipo da struct no escopo atual (global)
+        // 5. Registrar o tipo da struct no escopo atual (global)
         //    Guardamos como um Símbolo para que 'visitDeclaration' o encontre depois.
         this.currentScope.put(typeName, new Symbol(typeName, structType));
         
-        System.out.println("Definição de struct registada: " + typeName);
+        System.out.println("Definição de struct registrada: " + typeName);
 
         return null;
     }
 
+    @Override
+    public Type visitUnionDeclaration(CParser.UnionDeclarationContext ctx) {
+        String unionName = ctx.ID().getText();
+        String typeName = "union " + unionName;
+
+        // 1. Criar o Tipo da Union e a sua tabela de membros
+        Type unionType = new Type(typeName);
+        unionType.members = new SymbolTable(null); 
+
+        // 2. Mudar temporariamente o escopo para capturar os membros na tabela da union
+        SymbolTable previousScope = this.currentScope;
+        this.currentScope = unionType.members;
+
+        // 3. Visitar as declarações dentro da union
+        for (CParser.DeclarationContext decl : ctx.declaration()) {
+            visit(decl);
+        }
+
+        // 4. Restaurar o escopo anterior
+        this.currentScope = previousScope;
+
+        // 5. Registrar a union no escopo atual (global) para uso futuro
+        this.currentScope.put(typeName, new Symbol(typeName, unionType));
+        
+        System.out.println("Definição de union registrada: " + typeName);
+
+        return null;
+    }
+    
     @Override
     public Type visitDeclaration(CParser.DeclarationContext ctx) {
         // MUDANÇA AQUI: Usar getTypeName em vez de getText
@@ -108,11 +137,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         Symbol varSymbol = new Symbol(varName, varType);
         this.currentScope.put(varName, varSymbol);
         
-        System.out.println("   Registando variável: " + varName + " (" + typeName + ")");
+        System.out.println("   Registrando variável: " + varName + " (" + typeName + ")");
 
         if (ctx.expr() != null) {
             Type exprType = visit(ctx.expr());
-            if (exprType != null && !exprType.name.equals("error") && !varType.equals(exprType)) {
+            if (exprType != null && !exprType.name.equals("error") && !isCompatible(varType, exprType)) {
                 System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + exprType.name + " a " + varType.name);
             }
         }
@@ -121,14 +150,14 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     }
     
     @Override
-    public Type visitAssignment(CParser.AssignmentContext ctx) {
+    public Type visitAssignment(CParser.AssignmentContext ctx) {    
         // ... (código existente sem alterações)
         Type lhsType = visit(ctx.unaryExpr());
         Type rhsType = visit(ctx.expr());
         if (lhsType != null && rhsType != null && 
             !lhsType.name.equals("error") && !rhsType.name.equals("error")) 
         {
-            if (!lhsType.equals(rhsType)) {
+            if (!isCompatible(lhsType, rhsType)) {
                 System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + rhsType.name + " a " + lhsType.name);
             }
         }
@@ -137,8 +166,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
-        // A regra é: primary ('.' ID | '[' expr ']' | '(' argumentList? ')')*
-
         Type primaryType = visit(ctx.primary());
         String primaryName = ctx.primary().getText();
 
@@ -186,8 +213,10 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             for (int i = 0; i < actualParams.size(); i++) {
                 Type expectedType = expectedParams.get(i);
                 Type actualType = visit(actualParams.get(i));
+
                 if (actualType != null && !actualType.name.equals("error")) {
-                    if (!expectedType.equals(actualType)) {
+                    // CORREÇÃO AQUI: Usar isCompatible em vez de equals
+                    if (!isCompatible(expectedType, actualType)) {
                         System.err.println("ERRO SEMÂNTICO: Argumento " + (i+1) + " da função '" + primaryName + 
                                            "' é inválido. Esperava '" + expectedType.name + "' mas recebeu '" + actualType.name + "'.");
                     }
@@ -196,32 +225,24 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             return functionSymbol.type;
         }
 
-        // 3. NOVO: Acesso a Membro de Struct (ex: p.x)
-        //    Na regra gramatical, se tivermos um ponto, teremos um ID na lista de IDs do contexto.
+        // 3. Acesso a Membro de Struct
         if (!ctx.ID().isEmpty()) {
-            // O ctx.ID() retorna uma lista. O índice 0 é o primeiro membro acessado.
             String memberName = ctx.ID(0).getText();
-
-            // Verifica se o tipo principal tem tabela de membros (ou seja, se é uma struct)
             if (primaryType.members == null) {
                 System.err.println("ERRO SEMÂNTICO: A variável '" + primaryName + "' (" + primaryType.name + ") não é uma struct/union, não pode aceder a '" + memberName + "'.");
                 return new Type("error");
             }
-
-            // Procura o membro na tabela de símbolos da struct
             Symbol member = primaryType.members.get(memberName);
             if (member == null) {
                 System.err.println("ERRO SEMÂNTICO: O campo '" + memberName + "' não existe em '" + primaryType.name + "'.");
                 return new Type("error");
             }
-
-            // Retorna o tipo do membro encontrado
             return member.type;
         }
 
         return primaryType;
     }
-    
+     
     @Override
     public Type visitPrimary(CParser.PrimaryContext ctx) {
         // ... (código existente sem alterações)
@@ -437,10 +458,19 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return null;
     }
 
-    /**
-     * Método auxiliar para extrair o nome do tipo formatado corretamente.
-     * Resolve o problema de "structPonto" vs "struct Ponto".
-     */
+    private boolean isCompatible(Type targetType, Type sourceType) {
+        if (targetType.equals(sourceType)) {
+            return true;
+        }
+
+        // Regra especial para Strings em C
+        if (sourceType.name.equals("string")) {
+            return targetType.name.equals("char*") || targetType.name.equals("char[]");
+        }
+
+        return false;
+    }
+       
     private String getTypeName(CParser.TypeContext ctx) {
         String text = ctx.baseType().getText();
         
