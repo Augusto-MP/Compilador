@@ -1,8 +1,8 @@
 grammar C;
 
-@header {
-package gen;
-}
+//@header {
+//package gen;
+//}
 
 // --- Regras do Parser (Sintaxe) ---
 

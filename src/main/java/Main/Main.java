@@ -4,9 +4,9 @@ import java.io.IOException;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
 
+import CLexer;
+import CParser;
 import compiler.MyCVisitor;
-import gen.CLexer;
-import gen.CParser;
 
 public class Main {
     public static void main(String[] args) {
