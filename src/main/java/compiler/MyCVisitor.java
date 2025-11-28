@@ -1,9 +1,10 @@
 package compiler;
 
-import gen.CBaseVisitor;
-import gen.CParser;
 import java.util.ArrayList; // Precisamos de Listas agora
 import java.util.List;
+
+import gen.CBaseVisitor;
+import gen.CParser;
 
 public class MyCVisitor extends CBaseVisitor<Type> {
 

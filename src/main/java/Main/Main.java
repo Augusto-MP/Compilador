@@ -3,11 +3,10 @@ package Main;
 import java.io.IOException;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
-import compiler.MyCVisitor;
 
-// Importa as classes do nosso novo pacote 'gen'
 import gen.CLexer;
 import gen.CParser;
+import compiler.MyCVisitor;
 
 public class Main {
     public static void main(String[] args) {

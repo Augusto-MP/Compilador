@@ -6,7 +6,7 @@ package gen;
 
 // --- Regras do Parser (Sintaxe) ---
 
-program: (structDeclaration | unionDeclaration | functionDeclaration | statement)+ ;
+program: (preprocessorDirective | structDeclaration | unionDeclaration | functionDeclaration | statement)+ ;
 
 statement: declaration
          | assignment
@@ -20,6 +20,13 @@ statement: declaration
          | postfixExpr ';' 
          | block
          ;
+// Novas regras para o pré-processador
+preprocessorDirective: includeDirective | defineDirective ;
+
+includeDirective: '#' 'include' (STRING | libraryPath) ;
+libraryPath: '<' ID ('.' ID)? '>' ; // Ex: <stdio.h>
+
+defineDirective: '#' 'define' ID expr ; // Ex: #define PI 3.14
 
 structDeclaration: 'struct' ID '{' declaration+ '}' ';' ;
 unionDeclaration: 'union' ID '{' declaration+ '}' ';' ;
@@ -96,4 +103,3 @@ WS: [ \t\r\n]+ -> skip;
 
 LINE_COMMENT: '//' .*? '\r'? '\n' -> skip;
 BLOCK_COMMENT: '/*' .*? '*/' -> skip;
-PREPROCESSOR_DIRECTIVE: '#' .*? '\r'? '\n' -> skip;

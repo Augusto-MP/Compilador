@@ -1,5 +1,4 @@
-// Generated from gen/C.g4 by ANTLR 4.13.1
-package gen;
+// Generated from c:/Users/Augusto M/Documents/faculdade 2025/Compiladores/protótipoInterpretador/interpretador/src/main/antlr4/gen/C.g4 by ANTLR 4.13.1
 
 package gen;
 

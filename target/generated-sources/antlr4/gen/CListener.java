@@ -1,4 +1,5 @@
-// Generated from C.g4 by ANTLR 4.13.1
+// Generated from gen/C.g4 by ANTLR 4.13.1
+package gen;
 
 package gen;
 
@@ -29,6 +30,46 @@ public interface CListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitStatement(CParser.StatementContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link CParser#preprocessorDirective}.
+	 * @param ctx the parse tree
+	 */
+	void enterPreprocessorDirective(CParser.PreprocessorDirectiveContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link CParser#preprocessorDirective}.
+	 * @param ctx the parse tree
+	 */
+	void exitPreprocessorDirective(CParser.PreprocessorDirectiveContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link CParser#includeDirective}.
+	 * @param ctx the parse tree
+	 */
+	void enterIncludeDirective(CParser.IncludeDirectiveContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link CParser#includeDirective}.
+	 * @param ctx the parse tree
+	 */
+	void exitIncludeDirective(CParser.IncludeDirectiveContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link CParser#libraryPath}.
+	 * @param ctx the parse tree
+	 */
+	void enterLibraryPath(CParser.LibraryPathContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link CParser#libraryPath}.
+	 * @param ctx the parse tree
+	 */
+	void exitLibraryPath(CParser.LibraryPathContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link CParser#defineDirective}.
+	 * @param ctx the parse tree
+	 */
+	void enterDefineDirective(CParser.DefineDirectiveContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link CParser#defineDirective}.
+	 * @param ctx the parse tree
+	 */
+	void exitDefineDirective(CParser.DefineDirectiveContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link CParser#structDeclaration}.
 	 * @param ctx the parse tree
