@@ -17,57 +17,42 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitFunctionDeclaration(CParser.FunctionDeclarationContext ctx) {
-        
         String functionName = ctx.ID().getText();
-        String returnTypeName = ctx.type().getText();
+        // MUDANÇA AQUI
+        String returnTypeName = getTypeName(ctx.type());
         Type functionType = new Type(returnTypeName);
         
-        // --- INÍCIO DA NOVA LÓGICA ---
-
-        // 1. Criar a lista para guardar os tipos dos parâmetros
         List<Type> paramTypes = new ArrayList<>();
-        
-        // 2. Criar o novo escopo para esta função (ANTES de processar os parâmetros)
         SymbolTable functionScope = new SymbolTable(this.currentScope);
 
-        // 3. Processar a lista de parâmetros (se ela existir)
         if (ctx.parameterList() != null) {
             for (CParser.ParameterContext paramCtx : ctx.parameterList().parameter()) {
-                // Obter o tipo e nome do parâmetro
-                String paramTypeName = paramCtx.type().getText();
+                // MUDANÇA AQUI TAMBÉM
+                String paramTypeName = getTypeName(paramCtx.type());
                 String paramName = paramCtx.ID().getText();
                 Type paramType = new Type(paramTypeName);
 
-                // Adicionar o tipo à nossa lista
                 paramTypes.add(paramType);
-
-                // Adicionar o parâmetro como um símbolo no NOVO escopo da função
                 functionScope.put(paramName, new Symbol(paramName, paramType));
             }
         }
         
-        // 4. Criar o símbolo da função usando o NOVO construtor
         Symbol functionSymbol = new Symbol(functionName, functionType, paramTypes);
-
-        // 5. Adicionar a função ao escopo ATUAL (global)
         this.currentScope.put(functionName, functionSymbol);
-        System.out.println("Registrando nova função no escopo: " + functionSymbol);
+        System.out.println("Registando nova função no escopo: " + functionSymbol);
 
-        // --- FIM DA NOVA LÓGICA ---
-
-        // 6. Lógica de gestão de escopo (alterada para visitar apenas o bloco)
         Symbol oldFunction = this.currentFunction;
         this.currentFunction = functionSymbol;      
-        this.currentScope = functionScope; // Entrar no escopo da função
+        this.currentScope = functionScope;
 
-        visit(ctx.block()); // 7. Visitamos apenas o BLOCO (e não os filhos todos)
+        visit(ctx.block());
 
         this.currentScope = this.currentScope.getParent();
         this.currentFunction = oldFunction;
 
         return null;
     }
-
+      
     @Override
     public Type visitStructDeclaration(CParser.StructDeclarationContext ctx) {
         String structName = ctx.ID().getText();
@@ -101,27 +86,22 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitDeclaration(CParser.DeclarationContext ctx) {
-        String typeName = ctx.type().getText();
+        // MUDANÇA AQUI: Usar getTypeName em vez de getText
+        String typeName = getTypeName(ctx.type());
         String varName = ctx.ID().getText();
         boolean isArray = false;
 
-        // Verifica se é array
         if (ctx.INT() != null && !ctx.INT().isEmpty()) {
             typeName += "[]";
             isArray = true;
         }
         
         Type varType;
-
-        // NOVO: Tentar recuperar o tipo da Tabela de Símbolos
-        // Se for 'struct Ponto', queremos o objeto Type que já tem os 'members' preenchidos.
         Symbol typeSymbol = this.currentScope.get(typeName);
         
         if (typeSymbol != null && !isArray) {
-            // Encontrámos a definição da struct! Usamos esse Type especial.
             varType = typeSymbol.type;
         } else {
-            // É um tipo primitivo (int) ou um array (que tratamos de forma simples por enquanto)
             varType = new Type(typeName);
         }
 
@@ -130,7 +110,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         
         System.out.println("   Registando variável: " + varName + " (" + typeName + ")");
 
-        // Verificação de inicialização
         if (ctx.expr() != null) {
             Type exprType = visit(ctx.expr());
             if (exprType != null && !exprType.name.equals("error") && !varType.equals(exprType)) {
@@ -140,7 +119,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         return null;
     }
-
+    
     @Override
     public Type visitAssignment(CParser.AssignmentContext ctx) {
         // ... (código existente sem alterações)
@@ -181,7 +160,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         // 2. Chamada de Função
         if (!ctx.argumentList().isEmpty()) {
             Symbol functionSymbol = this.currentScope.get(primaryName);
-            if (functionSymbol == null) { return new Type("error"); } // Já reportado no visitPrimary
+            if (functionSymbol == null) { return new Type("error"); }
 
             if (!functionSymbol.isFunction()) {
                 System.err.println("ERRO SEMÂNTICO: '" + primaryName + "' não é uma função e não pode ser chamada.");
@@ -218,30 +197,31 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         }
 
         // 3. NOVO: Acesso a Membro de Struct (ex: p.x)
+        //    Na regra gramatical, se tivermos um ponto, teremos um ID na lista de IDs do contexto.
         if (!ctx.ID().isEmpty()) {
-            // Obtém o nome do campo (o ID após o ponto)
+            // O ctx.ID() retorna uma lista. O índice 0 é o primeiro membro acessado.
             String memberName = ctx.ID(0).getText();
 
-            // Verifica se a variável principal é uma struct (tem tabela de membros?)
+            // Verifica se o tipo principal tem tabela de membros (ou seja, se é uma struct)
             if (primaryType.members == null) {
                 System.err.println("ERRO SEMÂNTICO: A variável '" + primaryName + "' (" + primaryType.name + ") não é uma struct/union, não pode aceder a '" + memberName + "'.");
                 return new Type("error");
             }
 
-            // Verifica se o campo existe na struct
+            // Procura o membro na tabela de símbolos da struct
             Symbol member = primaryType.members.get(memberName);
             if (member == null) {
                 System.err.println("ERRO SEMÂNTICO: O campo '" + memberName + "' não existe em '" + primaryType.name + "'.");
                 return new Type("error");
             }
 
-            // Retorna o tipo do campo (ex: int)
+            // Retorna o tipo do membro encontrado
             return member.type;
         }
 
         return primaryType;
     }
-
+    
     @Override
     public Type visitPrimary(CParser.PrimaryContext ctx) {
         // ... (código existente sem alterações)
@@ -455,5 +435,30 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             }
         }
         return null;
+    }
+
+    /**
+     * Método auxiliar para extrair o nome do tipo formatado corretamente.
+     * Resolve o problema de "structPonto" vs "struct Ponto".
+     */
+    private String getTypeName(CParser.TypeContext ctx) {
+        String text = ctx.baseType().getText();
+        
+        // Se for struct ou union, forçamos o espaço
+        if (ctx.baseType().getChild(0).getText().equals("struct")) {
+            text = "struct " + ctx.baseType().ID().getText();
+        } else if (ctx.baseType().getChild(0).getText().equals("union")) {
+            text = "union " + ctx.baseType().ID().getText();
+        }
+        
+        // Adicionar ponteiros (*) se houver
+        // (Os filhos do TypeContext são: baseType e depois zero ou mais '*')
+        for (int i = 1; i < ctx.getChildCount(); i++) {
+            if (ctx.getChild(i).getText().equals("*")) {
+                text += "*";
+            }
+        }
+        
+        return text;
     }
 }

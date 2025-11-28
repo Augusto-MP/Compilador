@@ -1,19 +1,25 @@
 #include <stdio.h>
 
+struct Ponto {
+    int x;
+    int y;
+};
+
 int main() {
-    int arr[5];
-    int x = 10;
-    float y = 0.0;
-    int w;
+    struct Ponto p;
+    int a;
+    float b;
 
-    // 1. Teste de SUCESSO: Acesso a array com índice int
-    w = arr[0];
+    // 1. Teste SUCESSO: Acesso correto e tipos compatíveis
+    p.x = 10;
+    a = p.y;
 
-    // 2. Teste de ERRO: Acesso a não-array
-    w = x[0];
+    // 2. Teste ERRO: Campo inexistente
+    p.z = 20;
 
-    // 3. Teste de ERRO: Acesso a array com índice float
-    w = arr[y];
+    // 3. Teste ERRO: Acesso em variável não-struct
+    a.x = 10;
+    
+    // 4. Teste ERRO: Tipo incompatível na atribuição
+    b = p.x; 
 }
-
-void outraFuncao() {}
