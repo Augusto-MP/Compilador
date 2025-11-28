@@ -1,9 +1,5 @@
 grammar C;
 
-//@header {
-//package gen;
-//}
-
 // --- Regras do Parser (Sintaxe) ---
 
 program: (preprocessorDirective | structDeclaration | unionDeclaration | functionDeclaration | statement)+ ;

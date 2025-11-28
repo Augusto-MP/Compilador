@@ -4,8 +4,8 @@ import java.io.IOException;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
 
-import CLexer;
-import CParser;
+import gen.CLexer;
+import gen.CParser;
 import compiler.MyCVisitor;
 
 public class Main {
