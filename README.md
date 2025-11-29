@@ -41,3 +41,37 @@ O projeto foi dividido em quatro etapas principais:
 Na raiz do projeto, execute:
 ```bash
 mvn clean compile
+```
+
+## Executando o Compilador
+
+### Opção A: Windows 
+Utilize o script `compilador.bat`:
+
+```
+DOS
+.\compilador.bat <entrada.c> <saida.ll>
+```
+
+**Exemplo:**
+```
+DOS
+.\compilador.bat test.c saida.ll
+```
+
+### Opção B: Direto via Maven
+Caso não utilize Windows, pode executar diretamente pelo Maven:
+
+```
+Bash
+mvn -q exec:java -Dexec.mainClass="Main.Main" -Dexec.args="<entrada.c> <saida.ll>"
+```
+
+**Exemplo:**
+```
+Bash
+mvn -q exec:java -Dexec.mainClass="Main.Main" -Dexec.args="test.c saida.ll"
+```
+
+### Resultado
+O resultado será um arquivo `.ll` (ex: `saida.ll`) contendo o código LLVM IR pronto para ser executado ou compilado por ferramentas LLVM (como `lli` ou `clang`).
