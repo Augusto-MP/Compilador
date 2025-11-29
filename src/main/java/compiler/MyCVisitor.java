@@ -116,7 +116,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitDeclaration(CParser.DeclarationContext ctx) {
-        // MUDANÇA AQUI: Usar getTypeName em vez de getText
         String typeName = getTypeName(ctx.type());
         String varName = ctx.ID().getText();
         boolean isArray = false;
@@ -136,6 +135,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         }
 
         Symbol varSymbol = new Symbol(varName, varType);
+        if (ctx.expr() != null) {
+            varSymbol.initialized = true;
+        }
         this.currentScope.put(varName, varSymbol);
         
         System.out.println("   Registrando variável: " + varName + " (" + typeName + ")");
@@ -152,7 +154,14 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitAssignment(CParser.AssignmentContext ctx) {    
-        // ... (código existente sem alterações)
+        String varName = ctx.unaryExpr().getText();
+        Symbol symbol = this.currentScope.get(varName);
+
+        if (symbol != null && symbol.isConstant) {
+            System.err.println("ERRO SEMÂNTICO: Tentativa de atribuir valor à constante '" + varName + "'.");
+            return new Type("error"); // Retorna erro para evitar verificações seguintes
+        }
+
         Type lhsType = visit(ctx.unaryExpr());
         Type rhsType = visit(ctx.expr());
         if (lhsType != null && rhsType != null && 
@@ -246,7 +255,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
      
     @Override
     public Type visitPrimary(CParser.PrimaryContext ctx) {
-        // ... (código existente sem alterações)
+
         if (ctx.ID() != null) {
             String varName = ctx.ID().getText();
             Symbol symbol = this.currentScope.get(varName);
@@ -271,7 +280,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
-        // ... (código existente sem alterações)
         Type lhsType = visit(ctx.multiplicativeExpr(0));
         if (ctx.multiplicativeExpr().size() > 1) {
             Type rhsType = visit(ctx.multiplicativeExpr(1));
@@ -290,7 +298,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitMultiplicativeExpr(CParser.MultiplicativeExprContext ctx) {
-        // ... (código existente sem alterações)
         Type lhsType = visit(ctx.unaryExpr(0));
         if (ctx.unaryExpr().size() > 1) {
             Type rhsType = visit(ctx.unaryExpr(1));
@@ -309,7 +316,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitRelationalExpr(CParser.RelationalExprContext ctx) {
-        // ... (código existente sem alterações)
         Type lhsType = visit(ctx.additiveExpr(0));
         if (ctx.additiveExpr().size() > 1) {
             Type rhsType = visit(ctx.additiveExpr(1));
@@ -330,7 +336,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitEqualityExpr(CParser.EqualityExprContext ctx) {
-        // ... (código existente sem alterações)
         Type lhsType = visit(ctx.relationalExpr(0));
         if (ctx.relationalExpr().size() > 1) {
             Type rhsType = visit(ctx.relationalExpr(1));
@@ -349,7 +354,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitLogicalAndExpr(CParser.LogicalAndExprContext ctx) {
-        // ... (código existente sem alterações)
         Type lhsType = visit(ctx.equalityExpr(0));
         if (ctx.equalityExpr().size() > 1) {
             Type rhsType = visit(ctx.equalityExpr(1));
@@ -368,7 +372,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitLogicalOrExpr(CParser.LogicalOrExprContext ctx) {
-        // ... (código existente sem alterações)
         Type lhsType = visit(ctx.logicalAndExpr(0));
         if (ctx.logicalAndExpr().size() > 1) {
             Type rhsType = visit(ctx.logicalAndExpr(1));
@@ -387,7 +390,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitIfStatement(CParser.IfStatementContext ctx) {
-        // ... (código existente sem alterações)
         Type conditionType = visit(ctx.expr());
         if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
             System.err.println("ERRO SEMÂNTICO: A condição do 'if' deve ser do tipo 'int', mas é '" + conditionType.name + "'.");
@@ -401,7 +403,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitWhileStatement(CParser.WhileStatementContext ctx) {
-        // ... (código existente sem alterações)
         Type conditionType = visit(ctx.expr());
         if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
             System.err.println("ERRO SEMÂNTICO: A condição do 'while' deve ser do tipo 'int', mas é '" + conditionType.name + "'.");
@@ -412,7 +413,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitDoWhileStatement(CParser.DoWhileStatementContext ctx) {
-        // ... (código existente sem alterações)
         visit(ctx.statement());
         Type conditionType = visit(ctx.expr());
         if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
@@ -423,7 +423,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitForStatement(CParser.ForStatementContext ctx) {
-        // ... (código existente sem alterações)
         if (ctx.forInit() != null) {
             visit(ctx.forInit());
         }
@@ -442,7 +441,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitReturnStatement(CParser.ReturnStatementContext ctx) {
-        // ... (código existente sem alterações)
         Type expectedReturnType = this.currentFunction.type;
         Type actualReturnType;
         if (ctx.expr() != null) {
@@ -459,6 +457,65 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return null;
     }
 
+    @Override
+    public Type visitDefineDirective(CParser.DefineDirectiveContext ctx) {
+        String name = ctx.ID().getText();
+        
+        Type valueType = visit(ctx.expr()); 
+        
+        if (valueType == null) {
+            valueType = new Type("error");
+        }
+
+        Symbol s = new Symbol(name, valueType);
+        s.isConstant = true;
+
+        this.currentScope.put(name, s);
+
+        System.out.println("   Define registrado (constante): " + name + " : " + valueType.name);
+        
+        return null;
+    }
+
+    @Override
+    public Type visitIncludeDirective(CParser.IncludeDirectiveContext ctx) {
+        // Verifica se é o include da biblioteca <stdio.h>
+        if (ctx.libraryPath() != null && ctx.libraryPath().getText().equals("<stdio.h>")) {
+            
+            // Cria os tipos básicos para usar nas funções
+            Type voidType = new Type("void");
+            Type intType = new Type("int");
+            Type stringType = new Type("string");
+
+            // --- 1. printf(string) ---
+            // Nota: Definimos com 1 argumento (string) para funcionar o básico.
+            List<Type> printfParams = new ArrayList<>();
+            printfParams.add(stringType); 
+            Symbol printf = new Symbol("printf", voidType, printfParams);
+            this.currentScope.put("printf", printf);
+
+            // --- 2. scanf(string) ---
+            List<Type> scanfParams = new ArrayList<>();
+            scanfParams.add(stringType);
+            Symbol scanf = new Symbol("scanf", intType, scanfParams);
+            this.currentScope.put("scanf", scanf);
+
+            // --- 3. gets() -> retorna string ---
+            // Definimos sem parâmetros e retornando string para simplificar
+            Symbol gets = new Symbol("gets", stringType, new ArrayList<>());
+            this.currentScope.put("gets", gets);
+
+            // --- 4. puts(string) ---
+            List<Type> putsParams = new ArrayList<>();
+            putsParams.add(stringType);
+            Symbol puts = new Symbol("puts", voidType, putsParams);
+            this.currentScope.put("puts", puts);
+
+            System.out.println("   Biblioteca <stdio.h> carregada: printf, scanf, gets, puts injetados.");
+        }
+        return null;
+    }
+    
     private boolean isCompatible(Type targetType, Type sourceType) {
         if (targetType.equals(sourceType)) {
             return true;
