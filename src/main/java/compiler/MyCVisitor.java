@@ -10,6 +10,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     private SymbolTable currentScope;
     private Symbol currentFunction;
+    private boolean isProcessingLHS = false;
 
     public MyCVisitor() {
         this.currentScope = new SymbolTable(null);
@@ -162,7 +163,10 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             return new Type("error"); // Retorna erro para evitar verificações seguintes
         }
 
+        this.isProcessingLHS = true; 
         Type lhsType = visit(ctx.unaryExpr());
+        this.isProcessingLHS = false;
+
         Type rhsType = visit(ctx.expr());
         if (lhsType != null && rhsType != null && 
             !lhsType.name.equals("error") && !rhsType.name.equals("error")) 
@@ -263,6 +267,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 System.err.println("ERRO SEMÂNTICO: A variável '" + varName + "' não foi declarada.");
                 return new Type("error");
             } else {
+                if (!symbol.initialized && !isProcessingLHS) {
+                    System.err.println("ERRO SEMÂNTICO: Variável '" + varName + "' usada sem ser inicializada.");
+                }
                 System.out.println("   Variável '" + varName + "' encontrada no escopo. Tipo: " + symbol.type.name);
                 return symbol.type;
             }
