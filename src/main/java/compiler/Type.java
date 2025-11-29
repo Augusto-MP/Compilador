@@ -2,13 +2,19 @@ package compiler;
 
 public class Type {
     public String name; // ex: "int", "float", "struct Ponto"
-    public Object value;
     public SymbolTable members; 
+    public Object value;
 
     public Type(String name) {
         this.name = name;
         this.members = null;
         this.value = null;
+    }
+
+    public Type(String name, Object value) {
+        this.name = name;
+        this.members = null;
+        this.value = value;
     }
 
     @Override

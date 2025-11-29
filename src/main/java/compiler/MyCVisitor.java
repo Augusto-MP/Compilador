@@ -8,53 +8,132 @@ import gen.CParser;
 
 public class MyCVisitor extends CBaseVisitor<Type> {
 
+// Tabela de símbolos (Mantemos! É essencial para saber variáveis e tipos)
     private SymbolTable currentScope;
+    
+    // --- NOVIDADE LLVM ---
+    // Onde iremos escrever as instruções geradas (ex: "add i32 ...")
+    private StringBuilder llvmCode = new StringBuilder(); 
+    
+    // Contador para os registos temporários do LLVM (%1, %2, %3...)
+    private int tempCounter = 1; 
+
+    private List<String> globalDefs = new ArrayList<>();
+    
+    private String createGlobalString(String content) {
+        String name = "@.str" + (tempCounter++);
+        int len = content.length() + 1; // +1 para o caracter nulo \00
+        // Substitui \n por \0A (quebra de linha em Hex) para o LLVM não reclamar
+        String fmt = content.replace("\n", "\\0A"); 
+        
+        String def = name + " = private unnamed_addr constant [" + len + " x i8] c\"" + fmt + "\\00\"";
+        globalDefs.add(def);
+        return name;
+    }
+
+    // Para saber em que função estamos (útil para o return)
     private Symbol currentFunction;
-    private boolean isProcessingLHS = false;
 
     public MyCVisitor() {
         this.currentScope = new SymbolTable(null);
         this.currentFunction = null;
     }
+    
+    // Método auxiliar para gerar o próximo nome temporário (ex: %1)
+    private String nextTemp() {
+        return "%" + (tempCounter++);
+    }
+    
+    // Método auxiliar para escrever uma linha de código no buffer
+    private void emit(String code) {
+        llvmCode.append(code + "\n");
+    }
+    
+    public String getLLVMCode() {
+        StringBuilder sb = new StringBuilder();
+        // Globais primeiro
+        for (String s : globalDefs) {
+            sb.append(s).append("\n");
+        }
+        // Depois o código das funções
+        sb.append(llvmCode);
+        return sb.toString();
+    }
 
     @Override
     public Type visitFunctionDeclaration(CParser.FunctionDeclarationContext ctx) {
-        String functionName = ctx.ID().getText();
-        // MUDANÇA AQUI
-        String returnTypeName = getTypeName(ctx.type());
-        Type functionType = new Type(returnTypeName);
+        String funcName = ctx.ID().getText();
+        String returnType = toLLVMType(new Type(ctx.type().getText()));
         
-        List<Type> paramTypes = new ArrayList<>();
+        // 1. Preparar os Parâmetros para o Cabeçalho (ex: "i32 %0, float %1")
+        StringBuilder paramsLLVM = new StringBuilder();
+        List<String> paramNames = new ArrayList<>();
+        List<String> paramTypesLLVM = new ArrayList<>();
+        
+        // Novo escopo para a função
         SymbolTable functionScope = new SymbolTable(this.currentScope);
-
+        
         if (ctx.parameterList() != null) {
-            for (CParser.ParameterContext paramCtx : ctx.parameterList().parameter()) {
-                // MUDANÇA AQUI TAMBÉM
-                String paramTypeName = getTypeName(paramCtx.type());
-                String paramName = paramCtx.ID().getText();
-                Type paramType = new Type(paramTypeName);
-
-                paramTypes.add(paramType);
-                functionScope.put(paramName, new Symbol(paramName, paramType));
+            int i = 0;
+            for (CParser.ParameterContext param : ctx.parameterList().parameter()) {
+                String type = toLLVMType(new Type(param.type().getText()));
+                String name = param.ID().getText();
+                
+                if (i > 0) paramsLLVM.append(", ");
+                paramsLLVM.append(type).append(" %").append(i);
+                
+                paramNames.add(name);
+                paramTypesLLVM.add(type);
+                
+                // Guardamos no escopo, mas o valor (endereço) será definido logo a seguir
+                // Usamos a variável 'type' que já contém "i32" ou "float" convertidos
+                functionScope.put(name, new Symbol(name, new Type(type)));
+                i++;
             }
         }
+
+        // 2. Escrever o Cabeçalho da Função
+        // Ex: define i32 @main(...) {
+        emit("");
+        emit("define " + returnType + " @" + funcName + "(" + paramsLLVM + ") {");
+        emit("entry:"); // Label obrigatório de entrada
+
+        // 3. Alocar memória para os parâmetros (para serem variáveis mutáveis)
+        this.currentScope = functionScope; // Entra no escopo
         
-        Symbol functionSymbol = new Symbol(functionName, functionType, paramTypes);
-        this.currentScope.put(functionName, functionSymbol);
-        System.out.println("Registrando nova função no escopo: " + functionSymbol);
+        for (int i = 0; i < paramNames.size(); i++) {
+            String name = paramNames.get(i);
+            String type = paramTypesLLVM.get(i);
+            String valArg = "%" + i;       // O valor que veio do argumento
+            String ptrVar = "%" + name + "_ptr"; // O endereço na memória local
+            
+            // aloca espaço: %x_ptr = alloca i32
+            emit("  " + ptrVar + " = alloca " + type);
+            // guarda o valor inicial: store i32 %0, i32* %x_ptr
+            emit("  store " + type + " " + valArg + ", " + type + "* " + ptrVar);
+            
+            // Atualiza a tabela: agora o símbolo 'x' sabe que mora em '%x_ptr'
+            Symbol s = this.currentScope.get(name);
+            s.value = ptrVar; // Guardamos o ENDEREÇO (registo) no campo value
+        }
 
-        Symbol oldFunction = this.currentFunction;
-        this.currentFunction = functionSymbol;      
-        this.currentScope = functionScope;
-
+        // 4. Visitar o corpo da função
         visit(ctx.block());
 
-        this.currentScope = this.currentScope.getParent();
-        this.currentFunction = oldFunction;
-
+        // 5. Garantir retorno para Void (segurança)
+        if (returnType.equals("void")) {
+            emit("  ret void");
+        } else if (funcName.equals("main")) {
+            // Se for main e o utilizador esqueceu o return, devolvemos 0
+            emit("  ret i32 0");
+        }
+        
+        emit("}"); // Fecha a função
+        
+        this.currentScope = this.currentScope.getParent(); // Sai do escopo
         return null;
     }
-      
+    
     @Override
     public Type visitStructDeclaration(CParser.StructDeclarationContext ctx) {
         String structName = ctx.ID().getText();
@@ -117,216 +196,244 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitDeclaration(CParser.DeclarationContext ctx) {
-        String typeName = getTypeName(ctx.type());
+        // 1. Descobrir o nome e o tipo base
         String varName = ctx.ID().getText();
-        boolean isArray = false;
-
-        if (ctx.INT() != null && !ctx.INT().isEmpty()) {
-            typeName += "[]";
-            isArray = true;
-        }
+        String cTypeName = ctx.type().getText(); // ex: "int"
         
-        Type varType;
-        Symbol typeSymbol = this.currentScope.get(typeName);
+        // Converter para tipo LLVM (ex: "i32")
+        String llvmType = toLLVMType(new Type(cTypeName));
         
-        if (typeSymbol != null && !isArray) {
-            varType = typeSymbol.type;
-        } else {
-            varType = new Type(typeName);
+        // 2. Verificar se é um Array (ex: int arr[5])
+        boolean isArray = !ctx.INT().isEmpty();
+        if (isArray) {
+            String size = ctx.INT(0).getText();
+            // Em LLVM, array é: [5 x i32]
+            llvmType = "[" + size + " x " + llvmType + "]";
         }
 
-        Symbol varSymbol = new Symbol(varName, varType);
+        // 3. Gerar instrução de alocação de memória (alloca)
+        // Criamos um nome único para o ponteiro: %nome_ptr
+        String ptrVar = "%" + varName + "_ptr";
+        emit("  " + ptrVar + " = alloca " + llvmType);
+
+        // 4. Registrar na Tabela de Símbolos
+        // O símbolo 'x' agora sabe que o seu endereço na memória é '%x_ptr'
+        Type varType = new Type(cTypeName + (isArray ? "[]" : ""));
+        Symbol s = new Symbol(varName, varType);
+        s.value = ptrVar; // IMPORTANTE: Guardamos o endereço no campo value
+        s.initialized = (ctx.expr() != null); 
+        this.currentScope.put(varName, s);
+
+        // 5. Tratar Inicialização (int x = 10;)
         if (ctx.expr() != null) {
-            varSymbol.initialized = true;
-        }
-        this.currentScope.put(varName, varSymbol);
-        
-        System.out.println("   Registrando variável: " + varName + " (" + typeName + ")");
-
-        if (ctx.expr() != null) {
-            Type exprType = visit(ctx.expr());
-            if (exprType != null && !exprType.name.equals("error") && !isCompatible(varType, exprType)) {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + exprType.name + " a " + varType.name);
+            if (isArray) {
+                // (Opcional) Inicialização de array é mais complexa, podemos ignorar por agora
+                System.err.println("Aviso: Inicialização de array na declaração não suportada ainda.");
+            } else {
+                // Visitamos a expressão para obter o valor (ex: retorna um Type com value="10" ou value="%2")
+                Type valType = visit(ctx.expr());
+                String valReg = valType.value.toString();
+                
+                // Gera o store: store i32 %2, i32* %x_ptr
+                emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
             }
         }
-
+        
         return null;
     }
     
     @Override
-    public Type visitAssignment(CParser.AssignmentContext ctx) {    
+    public Type visitAssignment(CParser.AssignmentContext ctx) {
         String varName = ctx.unaryExpr().getText();
         Symbol symbol = this.currentScope.get(varName);
 
         if (symbol != null && symbol.isConstant) {
             System.err.println("ERRO SEMÂNTICO: Tentativa de atribuir valor à constante '" + varName + "'.");
-            return new Type("error"); // Retorna erro para evitar verificações seguintes
+            return new Type("error");
         }
 
-        this.isProcessingLHS = true; 
-        Type lhsType = visit(ctx.unaryExpr());
-        this.isProcessingLHS = false;
-
+        // 1. Calcular o valor da expressão (RHS)
+        // Isso vai gerar o código para calcular o valor e retornar o registo onde ele está (ex: %2)
         Type rhsType = visit(ctx.expr());
-        if (lhsType != null && rhsType != null && 
-            !lhsType.name.equals("error") && !rhsType.name.equals("error")) 
-        {
-            if (!isCompatible(lhsType, rhsType)) {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + rhsType.name + " a " + lhsType.name);
-            }
-            else {
+        String valReg = rhsType.value.toString();
+        
+        // 2. Obter o endereço da variável (LHS)
+        String ptrVar = symbol.value.toString(); // O endereço %x_ptr que guardamos na declaração
+        String llvmType = toLLVMType(symbol.type);
 
-                if (symbol != null) {
-                    symbol.initialized = true;
-                }
-            }
-        }
-        return null;
+        // 3. Gerar o Store: store i32 %2, i32* %x_ptr
+        emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
+        
+        // Em C, uma atribuição retorna o valor atribuído
+        return rhsType;
     }
-
+    
     @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
-        Type primaryType = visit(ctx.primary());
-        String primaryName = ctx.primary().getText();
-
-        // 1. Acesso a Array
-        if (ctx.expr() != null && !ctx.expr().isEmpty()) {
-            if (!primaryType.name.endsWith("[]")) {
-                System.err.println("ERRO SEMÂNTICO: A variável '" + primaryName + "' não é um array e não pode ser acedida com [].");
-                return new Type("error");
-            }
-            Type indexType = visit(ctx.expr(0));
-            if (indexType != null && !indexType.name.equals("int") && !indexType.name.equals("error")) {
-                System.err.println("ERRO SEMÂNTICO: O índice do array '" + primaryName + "' deve ser um 'int', mas é '" + indexType.name + "'.");
-                return new Type("error");
-            }
-            String baseTypeName = primaryType.name.replace("[]", "");
-            return new Type(baseTypeName);
-        }
-
-        // 2. Chamada de Função
+        // Verifica se é uma chamada de função
+        // A gramática é: primary ( '(' argumentList? ')' )* ...
+        // Se a lista de argumentos não estiver vazia, assumimos que é uma chamada
         if (!ctx.argumentList().isEmpty()) {
-            Symbol functionSymbol = this.currentScope.get(primaryName);
-            if (functionSymbol == null) { return new Type("error"); }
-
-            if (!functionSymbol.isFunction()) {
-                System.err.println("ERRO SEMÂNTICO: '" + primaryName + "' não é uma função e não pode ser chamada.");
-                return new Type("error");
-            }
-
-            List<Type> expectedParams = functionSymbol.paramTypes;
-            List<CParser.ExprContext> actualParams;
-            CParser.ArgumentListContext argListCtx = ctx.argumentList(0);
             
-            if (argListCtx != null) {
-                actualParams = argListCtx.expr();
-            } else {
-                actualParams = new ArrayList<>();
-            }
-
-            if (expectedParams.size() != actualParams.size()) {
-                System.err.println("ERRO SEMÂNTICO: A função '" + primaryName + "' espera " + expectedParams.size() + 
-                                   " argumentos, mas recebeu " + actualParams.size() + ".");
+            // O nome da função está no 'primary' (ex: printf)
+            String funcName = ctx.primary().getText();
+            
+            // 1. Verificar se a função existe na Tabela
+            Symbol funcSymbol = this.currentScope.get(funcName);
+            if (funcSymbol == null) {
+                System.err.println("ERRO: Função '" + funcName + "' não declarada.");
                 return new Type("error");
             }
 
-            for (int i = 0; i < actualParams.size(); i++) {
-                Type expectedType = expectedParams.get(i);
-                Type actualType = visit(actualParams.get(i));
+            // 2. Processar Argumentos
+            StringBuilder argsLLVM = new StringBuilder();
+            
+            // ATENÇÃO: Pegamos o primeiro (0) conjunto de argumentos
+            List<CParser.ExprContext> argsCtx = new ArrayList<>();
+            if (ctx.argumentList(0).expr() != null) {
+                argsCtx = ctx.argumentList(0).expr();
+            }
+            
+            for (int i = 0; i < argsCtx.size(); i++) {
+                Type argType = visit(argsCtx.get(i));
+                String argVal = argType.value.toString();
+                String llvmType = toLLVMType(argType);
 
-                if (actualType != null && !actualType.name.equals("error")) {
-                    // CORREÇÃO AQUI: Usar isCompatible em vez de equals
-                    if (!isCompatible(expectedType, actualType)) {
-                        System.err.println("ERRO SEMÂNTICO: Argumento " + (i+1) + " da função '" + primaryName + 
-                                           "' é inválido. Esperava '" + expectedType.name + "' mas recebeu '" + actualType.name + "'.");
-                    }
+                if (i > 0) argsLLVM.append(", ");
+
+                if (argType.name.equals("string")) {
+                    String globalVar = createGlobalString(argVal);
+                    int size = argVal.length() + 1;
+                    String strPtr = "getelementptr inbounds ([" + size + " x i8], [" + size + " x i8]* " + globalVar + ", i64 0, i64 0)";
+                    argsLLVM.append("i8* ").append(strPtr);
+                } else {
+                    argsLLVM.append(llvmType).append(" ").append(argVal);
                 }
             }
-            return functionSymbol.type;
-        }
 
-        // 3. Acesso a Membro de Struct
-        if (!ctx.ID().isEmpty()) {
-            String memberName = ctx.ID(0).getText();
-            if (primaryType.members == null) {
-                System.err.println("ERRO SEMÂNTICO: A variável '" + primaryName + "' (" + primaryType.name + ") não é uma struct/union, não pode aceder a '" + memberName + "'.");
-                return new Type("error");
+            // 3. Gerar o CALL
+            String returnTypeLLVM = toLLVMType(funcSymbol.type);
+            String callReg = "";
+            
+            if (!returnTypeLLVM.equals("void")) {
+                callReg = nextTemp(); 
+                emit("  " + callReg + " = call " + returnTypeLLVM + " (" + (funcName.equals("printf") ? "i8*, ..." : "") + ") @" + funcName + "(" + argsLLVM + ")");
+            } else {
+                emit("  call " + returnTypeLLVM + " @" + funcName + "(" + argsLLVM + ")");
             }
-            Symbol member = primaryType.members.get(memberName);
-            if (member == null) {
-                System.err.println("ERRO SEMÂNTICO: O campo '" + memberName + "' não existe em '" + primaryType.name + "'.");
-                return new Type("error");
-            }
-            return member.type;
+            
+            return new Type(funcSymbol.type.name, callReg);
         }
-
-        return primaryType;
+        
+        return visitChildren(ctx);
     }
-     
+    
     @Override
     public Type visitPrimary(CParser.PrimaryContext ctx) {
-
         if (ctx.ID() != null) {
             String varName = ctx.ID().getText();
             Symbol symbol = this.currentScope.get(varName);
+            
             if (symbol == null) {
                 System.err.println("ERRO SEMÂNTICO: A variável '" + varName + "' não foi declarada.");
                 return new Type("error");
-            } else {
-                if (!symbol.initialized && !isProcessingLHS) {
-                    System.err.println("ERRO SEMÂNTICO: Variável '" + varName + "' usada sem ser inicializada.");
-                }
-                System.out.println("   Variável '" + varName + "' encontrada no escopo. Tipo: " + symbol.type.name);
-                return symbol.type;
             }
+
+            // LLVM: Carregar o valor da variável
+            String ptrVar = symbol.value.toString();
+            String llvmType = toLLVMType(symbol.type);
+            String tempReg = nextTemp(); 
+            
+            emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrVar);
+            
+            return new Type(symbol.type.name, tempReg);
+            
         } else if (ctx.INT() != null) {
-            return new Type("int");
+            return new Type("int", ctx.INT().getText());
+            
         } else if (ctx.FLOAT() != null) {
-            return new Type("float");
-        } else if (ctx.CHAR() != null) {
-            return new Type("char");
+            return new Type("float", ctx.FLOAT().getText());
+            
         } else if (ctx.STRING() != null) {
-            return new Type("string");
+            return new Type("string", ctx.STRING().getText());
+            
+        } else if (ctx.expr() != null) {
+            // --- CORREÇÃO AQUI ---
+            // Se for ( expr ), visitamos a expressão interna e retornamos o resultado dela
+            // em vez de deixar o visitChildren devolver null por causa do ')'
+            return visit(ctx.expr());
         }
+        
         return visitChildren(ctx);
     }
-
+    
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
-        Type lhsType = visit(ctx.multiplicativeExpr(0));
-        if (ctx.multiplicativeExpr().size() > 1) {
-            Type rhsType = visit(ctx.multiplicativeExpr(1));
-            if (lhsType.name.equals("error") || rhsType.name.equals("error")) {
-                return new Type("error");
-            }
-            if (lhsType.equals(rhsType) && (lhsType.name.equals("int") || lhsType.name.equals("float"))) {
-                return lhsType;
+        // Visita o primeiro operando (ex: '10' em "10 + 5")
+        // Retorna um Type com value="%1" (se for variável) ou value="10" (se for literal)
+        Type result = visit(ctx.multiplicativeExpr(0));
+
+        // Percorre o resto da expressão (ex: ... + 5 - 2)
+        for (int i = 1; i < ctx.multiplicativeExpr().size(); i++) {
+            String op = ctx.getChild(2 * i - 1).getText(); // Pega o operador (+ ou -)
+            Type next = visit(ctx.multiplicativeExpr(i));  // Pega o próximo operando
+
+            // Decidir a instrução LLVM baseada no tipo
+            String llvmOp = "";
+            String typeCode = toLLVMType(result);
+            
+            if (result.name.equals("int")) {
+                llvmOp = op.equals("+") ? "add" : "sub";
+            } else if (result.name.equals("float")) {
+                llvmOp = op.equals("+") ? "fadd" : "fsub";
             } else {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis para operação aritmética: " + lhsType.name + " e " + rhsType.name);
-                return new Type("error");
+                // Simplificação: ignorar strings ou erros por agora
+                return result;
             }
+
+            // Gerar novo registo temporário para o resultado
+            String tempReg = nextTemp();
+            
+            // Escreve: %3 = add i32 %1, %2
+            emit("  " + tempReg + " = " + llvmOp + " " + typeCode + " " + result.value + ", " + next.value);
+            
+            // O resultado desta operação torna-se a base para a próxima (se houver)
+            result = new Type(result.name, tempReg);
         }
-        return lhsType;
+        return result;
     }
 
     @Override
     public Type visitMultiplicativeExpr(CParser.MultiplicativeExprContext ctx) {
-        Type lhsType = visit(ctx.unaryExpr(0));
-        if (ctx.unaryExpr().size() > 1) {
-            Type rhsType = visit(ctx.unaryExpr(1));
-            if (lhsType.name.equals("error") || rhsType.name.equals("error")) {
-                return new Type("error");
-            }
-            if (lhsType.equals(rhsType) && (lhsType.name.equals("int") || lhsType.name.equals("float"))) {
-                return lhsType;
-            } else {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis para operação aritmética: " + lhsType.name + " e " + rhsType.name);
-                return new Type("error");
-            }
-        }
-        return lhsType;
-    }
+        Type result = visit(ctx.unaryExpr(0));
 
+        for (int i = 1; i < ctx.unaryExpr().size(); i++) {
+            String op = ctx.getChild(2 * i - 1).getText();
+            Type next = visit(ctx.unaryExpr(i));
+
+            String llvmOp = "";
+            String typeCode = toLLVMType(result);
+
+            if (result.name.equals("int")) {
+                if (op.equals("*")) llvmOp = "mul";
+                else if (op.equals("/")) llvmOp = "sdiv"; // sdiv = signed division
+                else if (op.equals("%")) llvmOp = "srem"; // srem = signed remainder (módulo)
+            } else if (result.name.equals("float")) {
+                if (op.equals("*")) llvmOp = "fmul";
+                else if (op.equals("/")) llvmOp = "fdiv";
+                else llvmOp = "frem";
+            }
+
+            String tempReg = nextTemp();
+            
+            // Escreve: %4 = mul i32 %3, %2
+            emit("  " + tempReg + " = " + llvmOp + " " + typeCode + " " + result.value + ", " + next.value);
+            
+            result = new Type(result.name, tempReg);
+        }
+        return result;
+    }
+    
     @Override
     public Type visitRelationalExpr(CParser.RelationalExprContext ctx) {
         Type lhsType = visit(ctx.additiveExpr(0));
@@ -494,47 +601,55 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitUnaryExpr(CParser.UnaryExprContext ctx) {
-        // 1. Visita a expressão principal (ex: a variável no fim)
+        // 1. Visitar o operando primeiro (isso gera o código de LOAD se for uma variável)
+        // Ex: Para '&x', isso carrega o valor de x em %1 (o que vamos ignorar no caso do &)
         Type currentType = visit(ctx.postfixExpr());
 
-        // 2. Se houver operadores antes dela (ex: *ptr ou &x), processamos de trás para frente
-        // A gramática é: ('&' | '*' | '!')* postfixExpr
-        // Os operadores são os filhos, exceto o último (que é o postfixExpr)
-        
+        // 2. Processar operadores da direita para a esquerda
         for (int i = ctx.getChildCount() - 2; i >= 0; i--) {
             String operator = ctx.getChild(i).getText();
             
-            if (currentType == null || currentType.name.equals("error")) {
-                return new Type("error");
-            }
-
-            switch (operator) {
-                case "&":
-                    // Operador de Endereço: Adiciona um nível de ponteiro
-                    // Ex: int -> int*
-                    currentType = new Type(currentType.name + "*");
-                    break;
+            if (operator.equals("&")) {
+                // --- OPERADOR DE ENDEREÇO (&x) ---
+                // O 'currentType' tem o valor carregado, mas para '&' queremos o ENDEREÇO.
+                // Precisamos "espreitar" qual é a variável original para pegar o ponteiro dela.
                 
-                case "*":
-                    // Operador de Desreferência: Remove um nível de ponteiro
-                    // Ex: int* -> int
-                    if (currentType.name.endsWith("*")) {
-                        String newTypeName = currentType.name.substring(0, currentType.name.length() - 1);
-                        currentType = new Type(newTypeName);
-                    } else {
-                        System.err.println("ERRO SEMÂNTICO: Tentativa de desreferenciar (*) um tipo que não é ponteiro: " + currentType.name);
-                        return new Type("error");
-                    }
-                    break;
+                if (ctx.postfixExpr().primary() != null && ctx.postfixExpr().primary().ID() != null) {
+                    String varName = ctx.postfixExpr().primary().ID().getText();
+                    Symbol symbol = currentScope.get(varName);
                     
-                case "!":
-                    // Opcional: Operador lógico NOT
-                    // Geralmente retorna int (0 ou 1)
-                    currentType = new Type("int");
-                    break;
+                    if (symbol != null) {
+                        // AQUI ESTÁ O FIX: Pegamos o endereço (%x_ptr) que está guardado no Símbolo
+                        String ptrVar = symbol.value.toString();
+                        currentType = new Type(currentType.name + "*", ptrVar);
+                    }
+                } else {
+                     System.err.println("Erro: '&' suportado apenas para variáveis simples neste compilador.");
+                }
+            } 
+            else if (operator.equals("*")) {
+                // --- OPERADOR DE DESREFERÊNCIA (*ptr) ---
+                // O 'currentType' é um ponteiro (int*), e o value é o endereço (%1).
+                // Queremos ler o valor que está lá dentro.
+                
+                if (currentType.name.endsWith("*")) {
+                    // Remove o asterisco do tipo: int* -> int
+                    String typeName = currentType.name.substring(0, currentType.name.length() - 1);
+                    String llvmType = toLLVMType(new Type(typeName));
+                    
+                    String ptrReg = currentType.value.toString(); // O endereço
+                    String tempReg = nextTemp(); // Novo registo para o valor lido
+                    
+                    // Gera: %2 = load i32, i32* %1
+                    emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrReg);
+                    
+                    // Retorna o tipo base com o novo valor temporário
+                    currentType = new Type(typeName, tempReg);
+                } else {
+                     System.err.println("Erro: Tentativa de usar '*' em algo que não é ponteiro.");
+                }
             }
         }
-        
         return currentType;
     }
     
@@ -578,74 +693,63 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitIncludeDirective(CParser.IncludeDirectiveContext ctx) {
-        // Verifica se é o include da biblioteca <stdio.h>
+        // Verifica se é <stdio.h>
         if (ctx.libraryPath() != null && ctx.libraryPath().getText().equals("<stdio.h>")) {
             
-            // Cria os tipos básicos para usar nas funções
+            // --- PARTE 1: Mantemos a lógica antiga para a Análise Semântica ---
+            // (Isso impede que o compilador dê erro dizendo que printf não existe)
             Type voidType = new Type("void");
             Type intType = new Type("int");
             Type stringType = new Type("string");
 
-            // --- 1. printf(string) ---
-            // Nota: Definimos com 1 argumento (string) para funcionar o básico.
             List<Type> printfParams = new ArrayList<>();
             printfParams.add(stringType); 
-            Symbol printf = new Symbol("printf", voidType, printfParams);
-            this.currentScope.put("printf", printf);
+            this.currentScope.put("printf", new Symbol("printf", voidType, printfParams));
 
-            // --- 2. scanf(string) ---
             List<Type> scanfParams = new ArrayList<>();
             scanfParams.add(stringType);
-            Symbol scanf = new Symbol("scanf", intType, scanfParams);
-            this.currentScope.put("scanf", scanf);
+            this.currentScope.put("scanf", new Symbol("scanf", intType, scanfParams));
 
-            // --- 3. gets() -> retorna string ---
-            // Definimos sem parâmetros e retornando string para simplificar
-            Symbol gets = new Symbol("gets", stringType, new ArrayList<>());
-            this.currentScope.put("gets", gets);
-
-            // --- 4. puts(string) ---
+            this.currentScope.put("gets", new Symbol("gets", stringType, new ArrayList<>()));
+            
             List<Type> putsParams = new ArrayList<>();
             putsParams.add(stringType);
-            Symbol puts = new Symbol("puts", voidType, putsParams);
-            this.currentScope.put("puts", puts);
+            this.currentScope.put("puts", new Symbol("puts", voidType, putsParams));
 
-            System.out.println("   Biblioteca <stdio.h> carregada: printf, scanf, gets, puts injetados.");
+            
+            // --- PARTE 2: NOVIDADE LLVM - Geração de Código ---
+            // Escrevemos no arquivo as declarações reais que o LLVM precisa
+            emit("; --- Declarações Externas (stdio.h) ---");
+            emit("declare i32 @printf(i8*, ...)");
+            emit("declare i32 @scanf(i8*, ...)");
+            emit("declare i32 @puts(i8*)");
+            emit("declare i8* @gets(i8*)");
+            emit(""); // Linha em branco para organizar
+            
+            System.out.println("   <stdio.h> processado: Declarações LLVM geradas.");
         }
         return null;
-    }
-    
-    private boolean isCompatible(Type targetType, Type sourceType) {
-        if (targetType.equals(sourceType)) {
-            return true;
-        }
+    }    
 
-        // Regra especial para Strings em C
-        if (sourceType.name.equals("string")) {
-            return targetType.name.equals("char*") || targetType.name.equals("char[]");
+    // Converter tipos do C (int, void, int*) para LLVM (i32, void, i32*)
+    private String toLLVMType(Type t) {
+        if (t == null) return "void";
+        
+        // --- NOVIDADE: Suporte a Ponteiros ---
+        // Se o tipo terminar em '*', removemos o asterisco, convertemos a base e adicionamos o '*' de volta.
+        // Ex: "int*" -> base "int" -> converte para "i32" -> resultado "i32*"
+        if (t.name.endsWith("*")) {
+            String baseTypeName = t.name.substring(0, t.name.length() - 1);
+            return toLLVMType(new Type(baseTypeName)) + "*";
         }
+        // -------------------------------------
 
-        return false;
+        if (t.name.equals("int")) return "i32";
+        if (t.name.equals("float")) return "float";
+        if (t.name.equals("void")) return "void";
+        if (t.name.equals("string") || t.name.equals("char*")) return "i8*";
+        
+        return "i32"; // Padrão de segurança
     }
-       
-    private String getTypeName(CParser.TypeContext ctx) {
-        String text = ctx.baseType().getText();
-        
-        // Se for struct ou union, forçamos o espaço
-        if (ctx.baseType().getChild(0).getText().equals("struct")) {
-            text = "struct " + ctx.baseType().ID().getText();
-        } else if (ctx.baseType().getChild(0).getText().equals("union")) {
-            text = "union " + ctx.baseType().ID().getText();
-        }
-        
-        // Adicionar ponteiros (*) se houver
-        // (Os filhos do TypeContext são: baseType e depois zero ou mais '*')
-        for (int i = 1; i < ctx.getChildCount(); i++) {
-            if (ctx.getChild(i).getText().equals("*")) {
-                text += "*";
-            }
-        }
-        
-        return text;
-    }
+
 }
