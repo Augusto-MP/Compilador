@@ -174,6 +174,12 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             if (!isCompatible(lhsType, rhsType)) {
                 System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis. Não é possível atribuir " + rhsType.name + " a " + lhsType.name);
             }
+            else {
+
+                if (symbol != null) {
+                    symbol.initialized = true;
+                }
+            }
         }
         return null;
     }
@@ -446,6 +452,92 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return null;
     }
 
+    @Override
+    public Type visitSwitchStatement(CParser.SwitchStatementContext ctx) {
+        // 1. Avalia a expressão do switch (ex: switch(x) -> avalia x)
+        Type exprType = visit(ctx.expr());
+        
+        if (exprType != null && !exprType.name.equals("error")) {
+            // Verifica se é um tipo inteiro válido
+            if (!exprType.name.equals("int") && !exprType.name.equals("char")) {
+                System.err.println("ERRO SEMÂNTICO: A expressão do 'switch' deve ser 'int' ou 'char', mas é '" + exprType.name + "'.");
+            }
+        }
+
+        // 2. Visita todos os blocos 'case' e 'default' internos
+        for (CParser.CaseBlockContext caseCtx : ctx.caseBlock()) {
+            visit(caseCtx);
+        }
+        return null;
+    }
+
+    @Override
+    public Type visitCaseBlock(CParser.CaseBlockContext ctx) {
+        // Se existir uma expressão (é um 'case' e não 'default')
+        if (ctx.expr() != null) {
+            Type caseType = visit(ctx.expr());
+            
+            // O valor do case também deve ser compatível com inteiros
+            if (caseType != null && !caseType.name.equals("error")) {
+                if (!caseType.name.equals("int") && !caseType.name.equals("char")) {
+                    System.err.println("ERRO SEMÂNTICO: O valor do 'case' deve ser 'int' ou 'char'.");
+                }
+            }
+        }
+        
+        // Visita as instruções dentro deste case
+        for (CParser.StatementContext stmt : ctx.statement()) {
+            visit(stmt);
+        }
+        return null;
+    }
+    
+    @Override
+    public Type visitUnaryExpr(CParser.UnaryExprContext ctx) {
+        // 1. Visita a expressão principal (ex: a variável no fim)
+        Type currentType = visit(ctx.postfixExpr());
+
+        // 2. Se houver operadores antes dela (ex: *ptr ou &x), processamos de trás para frente
+        // A gramática é: ('&' | '*' | '!')* postfixExpr
+        // Os operadores são os filhos, exceto o último (que é o postfixExpr)
+        
+        for (int i = ctx.getChildCount() - 2; i >= 0; i--) {
+            String operator = ctx.getChild(i).getText();
+            
+            if (currentType == null || currentType.name.equals("error")) {
+                return new Type("error");
+            }
+
+            switch (operator) {
+                case "&":
+                    // Operador de Endereço: Adiciona um nível de ponteiro
+                    // Ex: int -> int*
+                    currentType = new Type(currentType.name + "*");
+                    break;
+                
+                case "*":
+                    // Operador de Desreferência: Remove um nível de ponteiro
+                    // Ex: int* -> int
+                    if (currentType.name.endsWith("*")) {
+                        String newTypeName = currentType.name.substring(0, currentType.name.length() - 1);
+                        currentType = new Type(newTypeName);
+                    } else {
+                        System.err.println("ERRO SEMÂNTICO: Tentativa de desreferenciar (*) um tipo que não é ponteiro: " + currentType.name);
+                        return new Type("error");
+                    }
+                    break;
+                    
+                case "!":
+                    // Opcional: Operador lógico NOT
+                    // Geralmente retorna int (0 ou 1)
+                    currentType = new Type("int");
+                    break;
+            }
+        }
+        
+        return currentType;
+    }
+    
     @Override
     public Type visitReturnStatement(CParser.ReturnStatementContext ctx) {
         Type expectedReturnType = this.currentFunction.type;

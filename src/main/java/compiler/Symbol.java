@@ -27,4 +27,9 @@ public class Symbol {
     public boolean isFunction() {
         return paramTypes != null;
     }
+
+    @Override
+    public String toString() {
+        return "Symbol [name=" + name + ", type=" + (type != null ? type.name : "null") + "]";
+    }
 }
