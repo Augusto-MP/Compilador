@@ -8,18 +8,13 @@ import gen.CParser;
 
 public class MyCVisitor extends CBaseVisitor<Type> {
 
-// Tabela de símbolos (Mantemos! É essencial para saber variáveis e tipos)
     private SymbolTable currentScope;
-    
-    // --- NOVIDADE LLVM ---
-    // Onde iremos escrever as instruções geradas (ex: "add i32 ...")
+    private boolean isProcessingLHS = false;
     private StringBuilder llvmCode = new StringBuilder(); 
-    
-    // Contador para os registos temporários do LLVM (%1, %2, %3...)
     private int tempCounter = 1; 
-
     private List<String> globalDefs = new ArrayList<>();
-    
+    private Symbol currentFunction;
+
     private String createGlobalString(String content) {
         String name = "@.str" + (tempCounter++);
         int len = content.length() + 1; // +1 para o caracter nulo \00
@@ -31,20 +26,15 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return name;
     }
 
-    // Para saber em que função estamos (útil para o return)
-    private Symbol currentFunction;
-
     public MyCVisitor() {
         this.currentScope = new SymbolTable(null);
         this.currentFunction = null;
     }
     
-    // Método auxiliar para gerar o próximo nome temporário (ex: %1)
     private String nextTemp() {
         return "%" + (tempCounter++);
     }
-    
-    // Método auxiliar para escrever uma linha de código no buffer
+
     private void emit(String code) {
         llvmCode.append(code + "\n");
     }
@@ -139,32 +129,47 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String structName = ctx.ID().getText();
         String typeName = "struct " + structName;
 
-        // 1. Criar o Tipo da Struct e a sua tabela de membros
+        // 1. Configurar Tabela de Símbolos (Mantém lógica existente)
         Type structType = new Type(typeName);
         structType.members = new SymbolTable(null); 
-
-        // 2. Mudar temporariamente o escopo atual para a tabela de membros
-        //    Assim, as declarações dentro da struct (int x;) ficam guardadas nela.
         SymbolTable previousScope = this.currentScope;
         this.currentScope = structType.members;
 
-        // 3. Visitar todas as declarações dentro da struct
+        // 2. Construir a lista de tipos do LLVM
+        StringBuilder llvmBody = new StringBuilder();
+        int index = 0;
+
         for (CParser.DeclarationContext decl : ctx.declaration()) {
-            visit(decl);
+            // Analisa o tipo do campo
+            String fieldTypeName = decl.type().getText();
+            Type fieldType = new Type(fieldTypeName); // Pode precisar de ajuste para arrays/ponteiros
+            String llvmType = toLLVMType(fieldType);
+            
+            if (index > 0) llvmBody.append(", ");
+            llvmBody.append(llvmType);
+
+            // Regista o campo no escopo com o seu índice
+            String fieldName = decl.ID().getText();
+            Symbol fieldSymbol = new Symbol(fieldName, fieldType);
+            fieldSymbol.memoryIndex = index++; // Guarda 0, 1, 2...
+            
+            this.currentScope.put(fieldName, fieldSymbol);
         }
 
-        // 4. Restaurar o escopo anterior
         this.currentScope = previousScope;
+        
+        // 3. Emitir a definição global no LLVM
+        // %struct.Ponto = type { i32, i32 }
+        String definition = "%struct." + structName + " = type { " + llvmBody + " }";
+        globalDefs.add(definition); // Adiciona ao topo do arquivo
 
-        // 5. Registrar o tipo da struct no escopo atual (global)
-        //    Guardamos como um Símbolo para que 'visitDeclaration' o encontre depois.
+        // Regista o tipo da struct no escopo global
         this.currentScope.put(typeName, new Symbol(typeName, structType));
         
-        System.out.println("Definição de struct registrada: " + typeName);
-
+        System.out.println("Definição LLVM registrada: " + definition);
         return null;
     }
-
+    
     @Override
     public Type visitUnionDeclaration(CParser.UnionDeclarationContext ctx) {
         String unionName = ctx.ID().getText();
@@ -198,43 +203,46 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     public Type visitDeclaration(CParser.DeclarationContext ctx) {
         // 1. Descobrir o nome e o tipo base
         String varName = ctx.ID().getText();
-        String cTypeName = ctx.type().getText(); // ex: "int"
+        String cTypeName = ctx.type().getText(); // ex: "struct Ponto"
         
-        // Converter para tipo LLVM (ex: "i32")
-        String llvmType = toLLVMType(new Type(cTypeName));
+        // Converter para tipo LLVM (ex: "%struct.Ponto")
+        Type typeObj = new Type(cTypeName); // Objeto temporário para conversão
+        String llvmType = toLLVMType(typeObj);
         
-        // 2. Verificar se é um Array (ex: int arr[5])
+        // 2. Verificar se é um Array
         boolean isArray = !ctx.INT().isEmpty();
         if (isArray) {
             String size = ctx.INT(0).getText();
-            // Em LLVM, array é: [5 x i32]
             llvmType = "[" + size + " x " + llvmType + "]";
         }
 
-        // 3. Gerar instrução de alocação de memória (alloca)
-        // Criamos um nome único para o ponteiro: %nome_ptr
+        // 3. Gerar alocação (alloca)
         String ptrVar = "%" + varName + "_ptr";
         emit("  " + ptrVar + " = alloca " + llvmType);
 
         // 4. Registrar na Tabela de Símbolos
-        // O símbolo 'x' agora sabe que o seu endereço na memória é '%x_ptr'
         Type varType = new Type(cTypeName + (isArray ? "[]" : ""));
+        
+        // --- CORREÇÃO CRÍTICA: Linkagem de Membros da Struct ---
+        // Se for uma struct, copiamos a tabela de membros da definição original
+        Symbol typeSymbol = this.currentScope.get(cTypeName);
+        if (typeSymbol != null && typeSymbol.type.members != null) {
+            varType.members = typeSymbol.type.members;
+        }
+        // -------------------------------------------------------
+
         Symbol s = new Symbol(varName, varType);
-        s.value = ptrVar; // IMPORTANTE: Guardamos o endereço no campo value
+        s.value = ptrVar; // Guardamos o endereço %..._ptr
         s.initialized = (ctx.expr() != null); 
         this.currentScope.put(varName, s);
 
         // 5. Tratar Inicialização (int x = 10;)
         if (ctx.expr() != null) {
             if (isArray) {
-                // (Opcional) Inicialização de array é mais complexa, podemos ignorar por agora
                 System.err.println("Aviso: Inicialização de array na declaração não suportada ainda.");
             } else {
-                // Visitamos a expressão para obter o valor (ex: retorna um Type com value="10" ou value="%2")
                 Type valType = visit(ctx.expr());
                 String valReg = valType.value.toString();
-                
-                // Gera o store: store i32 %2, i32* %x_ptr
                 emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
             }
         }
@@ -244,51 +252,43 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitAssignment(CParser.AssignmentContext ctx) {
-        String varName = ctx.unaryExpr().getText();
-        Symbol symbol = this.currentScope.get(varName);
-
-        if (symbol != null && symbol.isConstant) {
-            System.err.println("ERRO SEMÂNTICO: Tentativa de atribuir valor à constante '" + varName + "'.");
+        // 1. Avisar que estamos no Lado Esquerdo (LHS)
+        // Isso sinaliza para o visitPrimary/Postfix retornarem o ENDEREÇO, não o valor.
+        this.isProcessingLHS = true;
+        Type lhsType = visit(ctx.unaryExpr());
+        this.isProcessingLHS = false; // Desliga imediatamente
+        
+        if (lhsType == null || lhsType.name.equals("error")) {
             return new Type("error");
         }
 
-        // 1. Calcular o valor da expressão (RHS)
-        // Isso vai gerar o código para calcular o valor e retornar o registo onde ele está (ex: %2)
+        // lhsType.value contém o endereço de memória (ex: %x_ptr ou %elem_ptr)
+        String ptrVar = lhsType.value.toString(); 
+        String llvmType = toLLVMType(lhsType);
+
+        // 2. Visitar o Lado Direito (RHS) para pegar o VALOR
         Type rhsType = visit(ctx.expr());
         String valReg = rhsType.value.toString();
-        
-        // 2. Obter o endereço da variável (LHS)
-        String ptrVar = symbol.value.toString(); // O endereço %x_ptr que guardamos na declaração
-        String llvmType = toLLVMType(symbol.type);
 
-        // 3. Gerar o Store: store i32 %2, i32* %x_ptr
+        // 3. Gerar o Store
         emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
         
-        // Em C, uma atribuição retorna o valor atribuído
         return rhsType;
     }
     
     @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
-        // Verifica se é uma chamada de função
-        // A gramática é: primary ( '(' argumentList? ')' )* ...
-        // Se a lista de argumentos não estiver vazia, assumimos que é uma chamada
+        // 1. Chamada de Função
         if (!ctx.argumentList().isEmpty()) {
-            
-            // O nome da função está no 'primary' (ex: printf)
             String funcName = ctx.primary().getText();
-            
-            // 1. Verificar se a função existe na Tabela
             Symbol funcSymbol = this.currentScope.get(funcName);
+            
             if (funcSymbol == null) {
                 System.err.println("ERRO: Função '" + funcName + "' não declarada.");
                 return new Type("error");
             }
 
-            // 2. Processar Argumentos
             StringBuilder argsLLVM = new StringBuilder();
-            
-            // ATENÇÃO: Pegamos o primeiro (0) conjunto de argumentos
             List<CParser.ExprContext> argsCtx = new ArrayList<>();
             if (ctx.argumentList(0).expr() != null) {
                 argsCtx = ctx.argumentList(0).expr();
@@ -311,7 +311,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 }
             }
 
-            // 3. Gerar o CALL
             String returnTypeLLVM = toLLVMType(funcSymbol.type);
             String callReg = "";
             
@@ -324,7 +323,56 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             
             return new Type(funcSymbol.type.name, callReg);
         }
-        
+
+        // --- NOVO BLOCO DE STRUCTS ---
+        // 2. Acesso a Membro de Struct (ex: p.x)
+        if (!ctx.ID().isEmpty()) {
+            String memberName = ctx.ID(0).getText();
+            
+            // Truque: Precisamos do ENDEREÇO da struct (%p_ptr), não do valor carregado.
+            // Salvamos o estado atual, forçamos LHS=true para pegar o ponteiro, e depois restauramos.
+            boolean originalLHS = this.isProcessingLHS;
+            this.isProcessingLHS = true;
+            Type primaryType = visit(ctx.primary());
+            this.isProcessingLHS = originalLHS; // Restaura
+            
+            String primaryName = ctx.primary().getText();
+
+            if (primaryType.members == null) {
+                System.err.println("ERRO: '" + primaryName + "' não é struct.");
+                return new Type("error");
+            }
+            
+            Symbol member = primaryType.members.get(memberName);
+            if (member == null) {
+                System.err.println("ERRO: Campo '" + memberName + "' não existe.");
+                return new Type("error");
+            }
+
+            String structPtr = primaryType.value.toString();
+            String structLLVMType = toLLVMType(primaryType);
+            int fieldIndex = member.memoryIndex;
+            
+            String ptrMember = nextTemp();
+            
+            // Calcula o endereço do campo: %p_x = getelementptr ...
+            emit("  " + ptrMember + " = getelementptr inbounds " + structLLVMType + ", " + structLLVMType + "* " + structPtr + ", i32 0, i32 " + fieldIndex);
+
+            // DECISÃO IMPORTANTE:
+            // Se estamos no lado esquerdo (p.x = 10), retornamos o endereço para o store.
+            if (originalLHS) {
+                return new Type(member.type.name, ptrMember);
+            } 
+            // Se estamos usando o valor (y = p.x), fazemos o LOAD agora.
+            else {
+                String fieldLLVMType = toLLVMType(member.type);
+                String valReg = nextTemp();
+                emit("  " + valReg + " = load " + fieldLLVMType + ", " + fieldLLVMType + "* " + ptrMember);
+                return new Type(member.type.name, valReg);
+            }
+        }
+        // -----------------------------
+
         return visitChildren(ctx);
     }
     
@@ -339,34 +387,39 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 return new Type("error");
             }
 
-            // LLVM: Carregar o valor da variável
+            // Recupera o endereço guardado no Símbolo
             String ptrVar = symbol.value.toString();
             String llvmType = toLLVMType(symbol.type);
-            String tempReg = nextTemp(); 
             
-            emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrVar);
-            
-            return new Type(symbol.type.name, tempReg);
+            // Se estamos atribuindo (LHS), retornamos o endereço direto
+            if (isProcessingLHS) {
+                Type t = new Type(symbol.type.name, ptrVar);
+                t.members = symbol.type.members; // COPIA OS MEMBROS (CRÍTICO!)
+                return t;
+            } 
+            // Se estamos usando (RHS), fazemos o load
+            else {
+                String tempReg = nextTemp(); 
+                emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrVar);
+                
+                Type t = new Type(symbol.type.name, tempReg);
+                t.members = symbol.type.members; // COPIA OS MEMBROS AQUI TAMBÉM!
+                return t;
+            }
             
         } else if (ctx.INT() != null) {
             return new Type("int", ctx.INT().getText());
-            
         } else if (ctx.FLOAT() != null) {
             return new Type("float", ctx.FLOAT().getText());
-            
         } else if (ctx.STRING() != null) {
             return new Type("string", ctx.STRING().getText());
-            
         } else if (ctx.expr() != null) {
-            // --- CORREÇÃO AQUI ---
-            // Se for ( expr ), visitamos a expressão interna e retornamos o resultado dela
-            // em vez de deixar o visitChildren devolver null por causa do ')'
             return visit(ctx.expr());
         }
         
         return visitChildren(ctx);
     }
-    
+
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
         // Visita o primeiro operando (ex: '10' em "10 + 5")
@@ -731,25 +784,25 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return null;
     }    
 
-    // Converter tipos do C (int, void, int*) para LLVM (i32, void, i32*)
     private String toLLVMType(Type t) {
         if (t == null) return "void";
         
-        // --- NOVIDADE: Suporte a Ponteiros ---
-        // Se o tipo terminar em '*', removemos o asterisco, convertemos a base e adicionamos o '*' de volta.
-        // Ex: "int*" -> base "int" -> converte para "i32" -> resultado "i32*"
         if (t.name.endsWith("*")) {
             String baseTypeName = t.name.substring(0, t.name.length() - 1);
             return toLLVMType(new Type(baseTypeName)) + "*";
         }
-        // -------------------------------------
 
         if (t.name.equals("int")) return "i32";
         if (t.name.equals("float")) return "float";
         if (t.name.equals("void")) return "void";
         if (t.name.equals("string") || t.name.equals("char*")) return "i8*";
         
-        return "i32"; // Padrão de segurança
+        // --- NOVIDADE: Structs ---
+        if (t.name.startsWith("struct ")) {
+            String structName = t.name.replace("struct ", "");
+            return "%struct." + structName;
+        }
+        
+        return "i32"; 
     }
-
 }

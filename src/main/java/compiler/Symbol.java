@@ -12,6 +12,7 @@ public class Symbol {
     public SymbolTable members;   // Para structs/unions
     public boolean isConstant = false; 
     public boolean initialized = false;
+    public int memoryIndex = -1;
 
     public Symbol(String name, Type type) {
         this.name = name;
