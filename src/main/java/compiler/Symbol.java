@@ -5,6 +5,9 @@ import java.util.List;
 public class Symbol {
     public String name;
     public Type type;
+    
+    public Object value; 
+
     public List<Type> paramTypes; // Para funções
     public SymbolTable members;   // Para structs/unions
     public boolean isConstant = false; 
@@ -13,8 +16,7 @@ public class Symbol {
     public Symbol(String name, Type type) {
         this.name = name;
         this.type = type;
-        this.isConstant = false;
-        this.initialized = false;
+        this.value = null; // Variáveis começam sem valor
     }
     
     public Symbol(String name, Type type, List<Type> paramTypes) {
@@ -30,6 +32,7 @@ public class Symbol {
 
     @Override
     public String toString() {
-        return "Symbol [name=" + name + ", type=" + (type != null ? type.name : "null") + "]";
+        // Atualizamos o toString para mostrar o valor (ajuda muito no debug!)
+        return "Symbol [name=" + name + ", type=" + (type != null ? type.name : "null") + ", value=" + value + "]";
     }
 }
