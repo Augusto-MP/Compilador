@@ -124,7 +124,10 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 String name = param.ID().getText();
                 
                 if (argCount > 0) paramsLLVM.append(", ");
-                paramsLLVM.append(type).append(" %").append(argCount);
+                
+                // --- CORREÇÃO: Usar %argN em vez de %N ---
+                paramsLLVM.append(type).append(" %arg").append(argCount);
+                // ------------------------------------------
                 
                 paramNames.add(name);
                 paramTypesLLVM.add(type);
@@ -133,7 +136,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 argCount++;
             }
         }
-        this.tempCounter = argCount;
+        this.tempCounter = argCount; // Ajusta contadores temporários
         
         Symbol functionSymbol = new Symbol(funcName, new Type(returnTypeStr));
         this.currentScope.put(funcName, functionSymbol);
@@ -149,7 +152,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         for (int i = 0; i < paramNames.size(); i++) {
             String name = paramNames.get(i);
             String type = paramTypesLLVM.get(i);
-            String valArg = "%" + i;
+            
+            // --- CORREÇÃO: Referenciar o argumento como %argN ---
+            String valArg = "%arg" + i;
+            // ---------------------------------------------------
+            
             String ptrVar = "%" + name + "_ptr";
             
             emit("  " + ptrVar + " = alloca " + type);
@@ -161,11 +168,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         visit(ctx.block());
 
-        // Garantir retorno para void se usuário esquecer
+        // Garante retorno para void ou main
         if (returnTypeLLVM.equals("void")) {
             emit("  ret void");
-        } else if (returnTypeLLVM.equals("i32") && funcName.equals("main")) {
-            // Fallback para main se não tiver return
+        } else if (funcName.equals("main")) {
+            // Fallback caso o usuário esqueça o return na main
             emit("  ret i32 0");
         }
         
@@ -175,7 +182,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         this.currentFunction = oldFunction;
         return null;
     }
-
+    
     @Override
     public Type visitStructDeclaration(CParser.StructDeclarationContext ctx) {
         String structName = ctx.ID().getText();

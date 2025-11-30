@@ -56,22 +56,22 @@ declare i32 @puts(i8*)
 declare i8* @gets(i8*)
 
 
-define i32 @soma(i32 %0, i32 %1) {
+define i32 @soma(i32 %arg0, i32 %arg1) {
 entry:
   %a_ptr = alloca i32
-  store i32 %0, i32* %a_ptr
+  store i32 %arg0, i32* %a_ptr
   %b_ptr = alloca i32
-  store i32 %1, i32* %b_ptr
+  store i32 %arg1, i32* %b_ptr
   %t2 = load i32, i32* %a_ptr
   %t3 = load i32, i32* %b_ptr
   %t4 = add i32 %t2, %t3
   ret i32 %t4
 }
 
-define i32 @fatorial(i32 %0) {
+define i32 @fatorial(i32 %arg0) {
 entry:
   %n_ptr = alloca i32
-  store i32 %0, i32* %n_ptr
+  store i32 %arg0, i32* %n_ptr
   %t1 = load i32, i32* %n_ptr
   %t2 = icmp sle i32 %t1, 1
   %t3 = zext i1 %t2 to i32
