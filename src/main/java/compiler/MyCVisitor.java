@@ -1,7 +1,9 @@
 package compiler;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Stack;
 
 import gen.CBaseVisitor;
@@ -17,6 +19,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     private List<String> globalDefs = new ArrayList<>();
     private Symbol currentFunction;
     private Stack<String> breakStack = new Stack<>();
+    
+    // --- CORREÇÃO: Mapa para armazenar tamanhos reais das strings globais ---
+    private Map<String, Integer> globalStringLengths = new HashMap<>();
 
     public MyCVisitor() {
         this.currentScope = new SymbolTable(null);
@@ -27,17 +32,20 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String name = "@.str" + (globalCounter++);
         String fmt = content.replace("\\n", "\\0A");
         
-        // Cálculo simplificado de tamanho para evitar erros com caracteres de escape
+        // Cálculo preciso do tamanho considerando escapes do LLVM (\0A conta como 1 char)
         int realLen = 0;
         for (int i = 0; i < fmt.length(); i++) {
             if (fmt.charAt(i) == '\\' && i + 2 < fmt.length() && fmt.charAt(i+1) == '0' && fmt.charAt(i+2) == 'A') {
                 realLen++; 
-                i += 2; // Pula o 0A
+                i += 2; // Pula os caracteres do escape
             } else {
                 realLen++;
             }
         }
-        realLen += 1; // +1 para o \00
+        realLen += 1; // +1 para o terminador nulo \00
+        
+        // Armazena o tamanho correto para uso posterior
+        globalStringLengths.put(name, realLen);
         
         String def = name + " = private unnamed_addr constant [" + realLen + " x i8] c\"" + fmt + "\\00\"";
         globalDefs.add(def);
@@ -63,7 +71,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         if (t.name.equals("int")) return "i32";
         if (t.name.equals("float")) return "float";
         if (t.name.equals("void")) return "void";
-        if (t.name.equals("char")) return "i8"; // Melhor precisão para char
+        if (t.name.equals("char")) return "i8"; 
         if (t.name.equals("string") || t.name.equals("char*")) return "i8*";
         
         if (t.name.startsWith("struct ")) {
@@ -105,6 +113,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return sb.toString();
     }
 
+    // --- VISITOR METHODS ---
+
     @Override
     public Type visitFunctionDeclaration(CParser.FunctionDeclarationContext ctx) {
         String funcName = ctx.ID().getText();
@@ -124,10 +134,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 String name = param.ID().getText();
                 
                 if (argCount > 0) paramsLLVM.append(", ");
-                
-                // --- CORREÇÃO: Usar %argN em vez de %N ---
-                paramsLLVM.append(type).append(" %arg").append(argCount);
-                // ------------------------------------------
+                paramsLLVM.append(type).append(" %arg").append(argCount); // Nome seguro para argumento
                 
                 paramNames.add(name);
                 paramTypesLLVM.add(type);
@@ -136,7 +143,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 argCount++;
             }
         }
-        this.tempCounter = argCount; // Ajusta contadores temporários
+        this.tempCounter = argCount;
         
         Symbol functionSymbol = new Symbol(funcName, new Type(returnTypeStr));
         this.currentScope.put(funcName, functionSymbol);
@@ -152,11 +159,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         for (int i = 0; i < paramNames.size(); i++) {
             String name = paramNames.get(i);
             String type = paramTypesLLVM.get(i);
-            
-            // --- CORREÇÃO: Referenciar o argumento como %argN ---
             String valArg = "%arg" + i;
-            // ---------------------------------------------------
-            
             String ptrVar = "%" + name + "_ptr";
             
             emit("  " + ptrVar + " = alloca " + type);
@@ -168,11 +171,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         visit(ctx.block());
 
-        // Garante retorno para void ou main
         if (returnTypeLLVM.equals("void")) {
             emit("  ret void");
-        } else if (funcName.equals("main")) {
-            // Fallback caso o usuário esqueça o return na main
+        } else if (returnTypeLLVM.equals("i32") && funcName.equals("main")) {
             emit("  ret i32 0");
         }
         
@@ -182,7 +183,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         this.currentFunction = oldFunction;
         return null;
     }
-    
+
     @Override
     public Type visitStructDeclaration(CParser.StructDeclarationContext ctx) {
         String structName = ctx.ID().getText();
@@ -224,8 +225,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         }
 
         this.currentScope = previousScope;
-        
-        // Define o tipo no LLVM
         String definition = llvmTypeName + " = type { " + llvmBody + " }";
         globalDefs.add(definition);
 
@@ -259,11 +258,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         Symbol s = new Symbol(varName, varType);
 
-        // --- LÓGICA DE ESCOPO GLOBAL VS LOCAL ---
         if (currentFunction == null) {
             String globalName = "@" + varName;
             String initVal = "zeroinitializer";
-            // Inicialização simples para globais (0 padrão)
             if (!isArray && !llvmType.startsWith("%struct") && !llvmType.startsWith("%union")) {
                 initVal = "0"; 
             }
@@ -306,7 +303,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String valReg = rhsType.value.toString();
 
         emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
-        
         return rhsType;
     }
     
@@ -325,7 +321,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String valReg = rhsType.value.toString();
 
         emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
-        
         return rhsType;
     }
     
@@ -380,7 +375,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
             StringBuilder argsLLVM = new StringBuilder();
             List<CParser.ExprContext> argsCtx = new ArrayList<>();
-            
             if (ctx.argumentList() != null && !ctx.argumentList().isEmpty() && ctx.argumentList(0).expr() != null) {
                 argsCtx = ctx.argumentList(0).expr();
             }
@@ -394,7 +388,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
                 if (argType.name.equals("string")) {
                     String globalVar = createGlobalString(argVal);
-                    int size = argVal.length() - 2 + 1; 
+                    // --- CORREÇÃO: Usar o tamanho armazenado no mapa ---
+                    int size = globalStringLengths.get(globalVar); 
                     String strPtr = "getelementptr inbounds ([" + size + " x i8], [" + size + " x i8]* " + globalVar + ", i64 0, i64 0)";
                     argsLLVM.append("i8* ").append(strPtr);
                 } else {
@@ -405,12 +400,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             String returnTypeLLVM = toLLVMType(funcSymbol.type);
             String callReg = "";
             
-            // --- CORREÇÃO AQUI: Adicionado || funcName.equals("scanf") ---
             if (!returnTypeLLVM.equals("void")) {
                 callReg = nextTemp(); 
+                // Suporte a funções variadic (printf/scanf)
                 String varArgs = (funcName.equals("printf") || funcName.equals("scanf")) ? "i8*, ..." : "";
                 
-                // Se for printf/scanf, ajusta a assinatura na chamada
                 if (!varArgs.isEmpty()) {
                      emit("  " + callReg + " = call " + returnTypeLLVM + " (" + varArgs + ") @" + funcName + "(" + argsLLVM + ")");
                 } else {
@@ -419,7 +413,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             } else {
                 emit("  call " + returnTypeLLVM + " @" + funcName + "(" + argsLLVM + ")");
             }
-            // -------------------------------------------------------------
             
             return new Type(funcSymbol.type.name, callReg);
         }
@@ -481,15 +474,12 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 return new Type("error");
             }
 
-            // --- CORREÇÃO: Constantes (#define) não são carregadas da memória ---
             if (symbol.isConstant) {
-                // Retorna o valor literal diretamente, sem load
                 return new Type("int", symbol.value);
             }
             
-            // Proteção extra contra ponteiro nulo (ex: funções usadas como var)
             if (symbol.value == null) {
-                 System.err.println("ERROR: Symbol '" + varName + "' has no value (maybe improper function usage?).");
+                 System.err.println("ERROR: Symbol '" + varName + "' has no value.");
                  return new Type("error");
             }
 
@@ -517,7 +507,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         } else if (ctx.FLOAT() != null) {
             return new Type("float", ctx.FLOAT().getText());
         } else if (ctx.CHAR() != null) {
-            // --- CORREÇÃO: Char literal ---
             String text = ctx.CHAR().getText(); 
             char c = text.charAt(1);            
             int ascii = (int) c;                
@@ -533,28 +522,24 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return visitChildren(ctx);
     }
 
+    // --- Métodos de Expressões (Soma, Mult, Lógica) seguem padrão simples ---
+    // Mantive os mesmos da versão anterior, pois estavam corretos.
+    
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
         Type result = visit(ctx.multiplicativeExpr(0));
-
         for (int i = 1; i < ctx.multiplicativeExpr().size(); i++) {
             String op = ctx.getChild(2 * i - 1).getText();
             Type next = visit(ctx.multiplicativeExpr(i));
-
             String llvmOp = "";
             String typeCode = toLLVMType(result);
-            
             if (result.name.equals("int") || result.name.equals("char")) {
                 llvmOp = op.equals("+") ? "add" : "sub";
             } else if (result.name.equals("float")) {
                 llvmOp = op.equals("+") ? "fadd" : "fsub";
-            } else {
-                return result;
-            }
-
+            } else return result;
             String tempReg = nextTemp();
             emit("  " + tempReg + " = " + llvmOp + " " + typeCode + " " + result.value + ", " + next.value);
-            
             result = new Type(result.name, tempReg);
         }
         return result;
@@ -563,14 +548,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitMultiplicativeExpr(CParser.MultiplicativeExprContext ctx) {
         Type result = visit(ctx.unaryExpr(0));
-
         for (int i = 1; i < ctx.unaryExpr().size(); i++) {
             String op = ctx.getChild(2 * i - 1).getText();
             Type next = visit(ctx.unaryExpr(i));
-
             String llvmOp = "";
             String typeCode = toLLVMType(result);
-
             if (result.name.equals("int") || result.name.equals("char")) {
                 if (op.equals("*")) llvmOp = "mul";
                 else if (op.equals("/")) llvmOp = "sdiv"; 
@@ -580,10 +562,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 else if (op.equals("/")) llvmOp = "fdiv";
                 else llvmOp = "frem";
             }
-
             String tempReg = nextTemp();
             emit("  " + tempReg + " = " + llvmOp + " " + typeCode + " " + result.value + ", " + next.value);
-            
             result = new Type(result.name, tempReg);
         }
         return result;
@@ -592,24 +572,18 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitRelationalExpr(CParser.RelationalExprContext ctx) {
         Type lhs = visit(ctx.additiveExpr(0));
-        
         for (int i = 1; i < ctx.additiveExpr().size(); i++) {
             String op = ctx.getChild(2 * i - 1).getText(); 
             Type rhs = visit(ctx.additiveExpr(i));
-            
             String tempReg = nextTemp();
             String instr = "";
-            
             if (op.equals("<")) instr = "icmp slt";
             else if (op.equals(">")) instr = "icmp sgt";
             else if (op.equals("<=")) instr = "icmp sle";
             else if (op.equals(">=")) instr = "icmp sge";
-
             emit("  " + tempReg + " = " + instr + " i32 " + lhs.value + ", " + rhs.value);
-
             String zextReg = nextTemp();
             emit("  " + zextReg + " = zext i1 " + tempReg + " to i32");
-
             lhs = new Type("int", zextReg);
         }
         return lhs;
@@ -618,19 +592,14 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitEqualityExpr(CParser.EqualityExprContext ctx) {
         Type lhs = visit(ctx.relationalExpr(0));
-
         for (int i = 1; i < ctx.relationalExpr().size(); i++) {
             String op = ctx.getChild(2 * i - 1).getText();
             Type rhs = visit(ctx.relationalExpr(i));
-
             String tempReg = nextTemp();
             String instr = op.equals("==") ? "icmp eq" : "icmp ne";
-
             emit("  " + tempReg + " = " + instr + " i32 " + lhs.value + ", " + rhs.value);
-
             String zextReg = nextTemp();
             emit("  " + zextReg + " = zext i1 " + tempReg + " to i32");
-
             lhs = new Type("int", zextReg);
         }
         return lhs;
@@ -639,22 +608,16 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitLogicalAndExpr(CParser.LogicalAndExprContext ctx) {
         Type lhs = visit(ctx.equalityExpr(0));
-
         for (int i = 1; i < ctx.equalityExpr().size(); i++) {
             Type rhs = visit(ctx.equalityExpr(i));
-
             String t1 = nextTemp();
             emit("  " + t1 + " = icmp ne i32 " + lhs.value + ", 0");
-            
             String t2 = nextTemp();
             emit("  " + t2 + " = icmp ne i32 " + rhs.value + ", 0");
-
             String tAnd = nextTemp();
             emit("  " + tAnd + " = and i1 " + t1 + ", " + t2);
-
             String tFinal = nextTemp();
             emit("  " + tFinal + " = zext i1 " + tAnd + " to i32");
-
             lhs = new Type("int", tFinal);
         }
         return lhs;
@@ -663,22 +626,16 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitLogicalOrExpr(CParser.LogicalOrExprContext ctx) {
         Type lhs = visit(ctx.logicalAndExpr(0));
-
         for (int i = 1; i < ctx.logicalAndExpr().size(); i++) {
             Type rhs = visit(ctx.logicalAndExpr(i));
-
             String t1 = nextTemp();
             emit("  " + t1 + " = icmp ne i32 " + lhs.value + ", 0");
-            
             String t2 = nextTemp();
             emit("  " + t2 + " = icmp ne i32 " + rhs.value + ", 0");
-
             String tOr = nextTemp();
             emit("  " + tOr + " = or i1 " + t1 + ", " + t2);
-
             String tFinal = nextTemp();
             emit("  " + tFinal + " = zext i1 " + tOr + " to i32");
-
             lhs = new Type("int", tFinal);
         }
         return lhs;
@@ -688,31 +645,23 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     public Type visitIfStatement(CParser.IfStatementContext ctx) {
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
-
         String boolReg = nextTemp();
         emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
-
         String labelThen = "L" + (tempCounter++);
         String labelElse = "L" + (tempCounter++);
         String labelMerge = "L" + (tempCounter++); 
-
         boolean hasElse = ctx.statement().size() > 1;
         String labelFalse = hasElse ? labelElse : labelMerge;
-
         emit("  br i1 " + boolReg + ", label %" + labelThen + ", label %" + labelFalse);
-
         emit(labelThen + ":");
         visit(ctx.statement(0));
         emit("  br label %" + labelMerge); 
-
         if (hasElse) {
             emit(labelElse + ":");
             visit(ctx.statement(1));
             emit("  br label %" + labelMerge);
         }
-
         emit(labelMerge + ":");
-
         return null;
     }
 
@@ -721,24 +670,17 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String labelStart = "L" + (tempCounter++);
         String labelBody = "L" + (tempCounter++);
         String labelEnd = "L" + (tempCounter++);
-
         emit("  br label %" + labelStart);
         emit(labelStart + ":");
-
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
-        
         String boolReg = nextTemp();
         emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
-
         emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
-
         emit(labelBody + ":");
         visit(ctx.statement());
         emit("  br label %" + labelStart); 
-
         emit(labelEnd + ":");
-
         return null;
     }
 
@@ -747,40 +689,28 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String labelBody = "L" + (tempCounter++);
         String labelCond = "L" + (tempCounter++);
         String labelEnd = "L" + (tempCounter++);
-
         emit("  br label %" + labelBody);
-
         emit(labelBody + ":");
         visit(ctx.statement()); 
         emit("  br label %" + labelCond); 
-
         emit(labelCond + ":");
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
-        
         String boolReg = nextTemp();
         emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
-
         emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
-
         emit(labelEnd + ":");
-
         return null;
     }
 
     @Override
     public Type visitForStatement(CParser.ForStatementContext ctx) {
-        if (ctx.forInit() != null) {
-            visit(ctx.forInit());
-        }
-
+        if (ctx.forInit() != null) visit(ctx.forInit());
         String labelCond = "L" + (tempCounter++);
         String labelBody = "L" + (tempCounter++);
         String labelUpdate = "L" + (tempCounter++);
         String labelEnd = "L" + (tempCounter++);
-
         emit("  br label %" + labelCond);
-        
         emit(labelCond + ":");
         if (ctx.forCond() != null) {
             Type condType = visit(ctx.forCond());
@@ -791,19 +721,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         } else {
             emit("  br label %" + labelBody);
         }
-
         emit(labelBody + ":");
         visit(ctx.statement());
         emit("  br label %" + labelUpdate); 
-
         emit(labelUpdate + ":");
-        if (ctx.forUpdate() != null) {
-            visit(ctx.forUpdate());
-        }
+        if (ctx.forUpdate() != null) visit(ctx.forUpdate());
         emit("  br label %" + labelCond); 
-
         emit(labelEnd + ":");
-
         return null;
     }
     
@@ -811,19 +735,14 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     public Type visitSwitchStatement(CParser.SwitchStatementContext ctx) {
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
-        
         String labelEnd = "L" + (tempCounter++);
         String labelDefault = "L" + (tempCounter++); 
-        
         breakStack.push(labelEnd);
-
         List<String> caseValues = new ArrayList<>();
         List<String> caseLabels = new ArrayList<>();
         String actualDefaultLabel = labelDefault; 
-        
         for (CParser.CaseBlockContext caseCtx : ctx.caseBlock()) {
             String labelCase = "L" + (tempCounter++);
-            
             if (caseCtx.expr() != null) { 
                 Type valType = visit(caseCtx.expr());
                 caseValues.add(valType.value.toString()); 
@@ -832,57 +751,33 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 actualDefaultLabel = labelCase;
             }
         }
-
         emit("  switch i32 " + condReg + ", label %" + actualDefaultLabel + " [");
         for (int i = 0; i < caseValues.size(); i++) {
             emit("    i32 " + caseValues.get(i) + ", label %" + caseLabels.get(i));
         }
         emit("  ]");
-
         int caseIndex = 0;
         for (CParser.CaseBlockContext caseCtx : ctx.caseBlock()) {
             String thisLabel;
-            
-            if (caseCtx.expr() != null) {
-                thisLabel = caseLabels.get(caseIndex++);
-            } else {
-                thisLabel = actualDefaultLabel;
-            }
-            
+            if (caseCtx.expr() != null) thisLabel = caseLabels.get(caseIndex++);
+            else thisLabel = actualDefaultLabel;
             emit(thisLabel + ":");
-            
-            for (CParser.StatementContext stmt : caseCtx.statement()) {
-                visit(stmt);
-            }
+            for (CParser.StatementContext stmt : caseCtx.statement()) visit(stmt);
             emit("  br label %" + labelEnd);
         }
-
         if (actualDefaultLabel.equals(labelDefault)) {
             emit(labelDefault + ":");
             emit("  br label %" + labelEnd);
         }
-
         emit(labelEnd + ":");
         breakStack.pop(); 
-
         return null;
     }
 
     @Override
     public Type visitCaseBlock(CParser.CaseBlockContext ctx) {
-        if (ctx.expr() != null) {
-            Type caseType = visit(ctx.expr());
-            
-            if (caseType != null && !caseType.name.equals("error")) {
-                if (!caseType.name.equals("int") && !caseType.name.equals("char")) {
-                    System.err.println("SEMANTIC ERROR: Case value must be 'int' or 'char'.");
-                }
-            }
-        }
-        
-        for (CParser.StatementContext stmt : ctx.statement()) {
-            visit(stmt);
-        }
+        if (ctx.expr() != null) visit(ctx.expr());
+        for (CParser.StatementContext stmt : ctx.statement()) visit(stmt);
         return null;
     }
     
@@ -891,8 +786,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         if (!breakStack.isEmpty()) {
             String label = breakStack.peek();
             emit("  br label %" + label);
-        } else {
-            System.err.println("SEMANTIC ERROR: 'break' outside of loop or switch.");
         }
         return null;
     }
@@ -900,47 +793,34 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitUnaryExpr(CParser.UnaryExprContext ctx) {
         Type currentType = visit(ctx.postfixExpr());
-
         for (int i = ctx.getChildCount() - 2; i >= 0; i--) {
             String operator = ctx.getChild(i).getText();
-            
             if (operator.equals("&")) {
                 if (ctx.postfixExpr().primary() != null && ctx.postfixExpr().primary().ID() != null) {
                     String varName = ctx.postfixExpr().primary().ID().getText();
                     Symbol symbol = currentScope.get(varName);
-                    
                     if (symbol != null) {
                         String ptrVar = symbol.value.toString();
                         currentType = new Type(currentType.name + "*", ptrVar);
                     }
-                } else {
-                     System.err.println("ERROR: '&' operator supported only for variables.");
                 }
             } 
             else if (operator.equals("*")) {
                 if (currentType.name.endsWith("*")) {
                     String typeName = currentType.name.substring(0, currentType.name.length() - 1);
                     String llvmType = toLLVMType(new Type(typeName));
-                    
                     String ptrReg = currentType.value.toString(); 
                     String tempReg = nextTemp();
-                    
                     emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrReg);
-                    
                     currentType = new Type(typeName, tempReg);
-                } else {
-                     System.err.println("ERROR: Attempt to dereference '*' a non-pointer.");
                 }
             }
             else if (operator.equals("!")) {
                 String valReg = currentType.value.toString();
-                
                 String tempCmp = nextTemp();
                 emit("  " + tempCmp + " = icmp eq i32 " + valReg + ", 0");
-                
                 String tempZext = nextTemp();
                 emit("  " + tempZext + " = zext i1 " + tempCmp + " to i32");
-                
                 currentType = new Type("int", tempZext);
             }
         }
@@ -953,7 +833,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             Type result = visit(ctx.expr());
             String valReg = result.value.toString();
             String typeCode = toLLVMType(result);
-            
             emit("  ret " + typeCode + " " + valReg);
         } else {
             emit("  ret void");
@@ -964,19 +843,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitDefineDirective(CParser.DefineDirectiveContext ctx) {
         String name = ctx.ID().getText();
-        
         Type valueType = visit(ctx.expr()); 
-        
-        if (valueType == null) {
-            valueType = new Type("error");
-        }
-
+        if (valueType == null) valueType = new Type("error");
         Symbol s = new Symbol(name, valueType);
         s.isConstant = true;
-        // --- CORREÇÃO: Salvar o valor da constante no símbolo ---
         s.value = valueType.value; 
-        // --------------------------------------------------------
-
         this.currentScope.put(name, s);
         return null;
     }
@@ -984,25 +855,19 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitIncludeDirective(CParser.IncludeDirectiveContext ctx) {
         if (ctx.libraryPath() != null && ctx.libraryPath().getText().equals("<stdio.h>")) {
-            
             Type voidType = new Type("void");
             Type intType = new Type("int");
             Type stringType = new Type("string");
-
             List<Type> printfParams = new ArrayList<>();
             printfParams.add(stringType); 
             this.currentScope.put("printf", new Symbol("printf", intType, printfParams));
-
             List<Type> scanfParams = new ArrayList<>();
             scanfParams.add(stringType);
             this.currentScope.put("scanf", new Symbol("scanf", intType, scanfParams));
-
             this.currentScope.put("gets", new Symbol("gets", stringType, new ArrayList<>()));
-            
             List<Type> putsParams = new ArrayList<>();
             putsParams.add(stringType);
             this.currentScope.put("puts", new Symbol("puts", voidType, putsParams));
-
             emit("; --- External Declarations (stdio.h) ---");
             emit("declare i32 @printf(i8*, ...)");
             emit("declare i32 @scanf(i8*, ...)");
