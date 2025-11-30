@@ -39,8 +39,8 @@ public class Main {
                 out.print(visitor.getLLVMCode());
             }
 
-            System.out.println("Compilacao concluida com sucesso!");
-            System.out.println("Codigo LLVM gerado em: " + outputFile);
+            System.out.println("Compilation successful!");
+            System.out.println("LLVM code generated at:" + outputFile);
 
         } catch (IOException e) {
             System.err.println("Error: " + e.getMessage());
