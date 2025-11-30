@@ -9,6 +9,12 @@ struct Ponto {
     int y;
 };
 
+// Adicionado para teste: Union
+union Valor {
+    int i;
+    float f;
+};
+
 // --- 6. Funções ---
 int soma(int a, int b) {
     return a + b;
@@ -141,6 +147,22 @@ int main() {
     printf("\n--- 9. Extras (IO e Define) ---\n");
     puts("  Teste de puts(): Ola Mundo!");
     printf("  Constante via define: %d (esperado 100)\n", CONSTANTE);
+
+    // --- 10. Unions (NOVO TESTE) ---
+    printf("\n--- 10. Unions ---\n");
+    union Valor u;
+    
+    // Teste 1: Atribui inteiro
+    u.i = 42;
+    printf("  [Union] Atribuido u.i = 42. Valor lido: %d\n", u.i);
+    
+    // Teste 2: Atribui float (deve sobrescrever a memória do int)
+    u.f = 3.14;
+    printf("  [Union] Atribuido u.f = 3.14. Valor lido: %f\n", u.f);
+    
+    // Teste 3: Verifica corrupção de memória (o int deve ter mudado)
+    printf("  [Union] Lendo u.i apos alterar u.f: %d (Deve ser diferente de 42)\n", u.i);
+
 
     printf("\n=== FIM DOS TESTES ===\n");
     return 0;

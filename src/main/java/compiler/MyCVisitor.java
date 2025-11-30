@@ -236,34 +236,53 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             llvmType = "[" + sizeStr + " x " + llvmType + "]";
         }
 
-        String ptrVar = "%" + varName + "_ptr";
-        emit("  " + ptrVar + " = alloca " + llvmType);
-
         Type varType = new Type(cTypeName + (isArray ? "[]" : ""));
-        
-        if (isArray) {
-            varType.arraySize = sizeInt;
-        }
-        
+        if (isArray) varType.arraySize = sizeInt;
+
+        // Recupera metadados de struct/union se existirem
         Symbol typeSymbol = this.currentScope.get(cTypeName);
         if (typeSymbol != null && typeSymbol.type.members != null) {
             varType.members = typeSymbol.type.members;
         }
 
         Symbol s = new Symbol(varName, varType);
-        s.value = ptrVar; 
-        s.initialized = (ctx.expr() != null); 
-        this.currentScope.put(varName, s);
 
-        if (ctx.expr() != null) {
-            if (isArray) {
-                System.err.println("WARNING: Array initialization at declaration not supported yet.");
-            } else {
-                Type valType = visit(ctx.expr());
-                String valReg = valType.value.toString();
-                emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
+        // --- CORREÇÃO: Verificação de Escopo Global vs Local ---
+        if (currentFunction == null) {
+            // Estamos no escopo global -> Usa @var e define como global
+            String globalName = "@" + varName;
+            
+            // Define valor inicial padrão (zero)
+            String initVal = "zeroinitializer";
+            if (!isArray && !llvmType.startsWith("%struct") && !llvmType.startsWith("%union")) {
+                initVal = "0"; // Para int/float simples
+            }
+            
+            // Adiciona à lista de definições globais
+            globalDefs.add(globalName + " = global " + llvmType + " " + initVal);
+            s.value = globalName; 
+
+        } else {
+            // Estamos dentro de uma função -> Usa %var e alloca na pilha
+            String ptrVar = "%" + varName + "_ptr";
+            emit("  " + ptrVar + " = alloca " + llvmType);
+            s.value = ptrVar;
+            
+            // Inicialização local (se houver = expr)
+            if (ctx.expr() != null) {
+                if (isArray) {
+                    System.err.println("WARNING: Array initialization at declaration not supported yet.");
+                } else {
+                    Type valType = visit(ctx.expr());
+                    String valReg = valType.value.toString();
+                    emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
+                }
             }
         }
+        // -------------------------------------------------------
+        
+        s.initialized = (ctx.expr() != null); 
+        this.currentScope.put(varName, s);
         
         return null;
     }
@@ -312,7 +331,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
-        // 1. Array Access
+        // 1. Acesso a Array
         if (ctx.expr() != null && !ctx.expr().isEmpty()) {
             Type indexType = visit(ctx.expr(0));
             String indexVal = indexType.value.toString();
@@ -342,8 +361,18 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             }
         }
         
-        // 2. Function Call
-        if (!ctx.argumentList().isEmpty()) {
+        // 2. Chamada de Função
+        // --- CORREÇÃO: Detecta função procurando pelo token '(' ---
+        boolean isFunctionCall = false;
+        for (int i = 0; i < ctx.getChildCount(); i++) {
+            if (ctx.getChild(i).getText().equals("(")) {
+                isFunctionCall = true;
+                break;
+            }
+        }
+
+        if (isFunctionCall) {
+        // ----------------------------------------------------------
             String funcName = ctx.primary().getText();
             Symbol funcSymbol = this.currentScope.get(funcName);
             
@@ -354,7 +383,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
             StringBuilder argsLLVM = new StringBuilder();
             List<CParser.ExprContext> argsCtx = new ArrayList<>();
-            if (ctx.argumentList(0).expr() != null) {
+            // Verifica se realmente existem argumentos antes de tentar pegá-los
+            if (ctx.argumentList() != null && !ctx.argumentList().isEmpty() && ctx.argumentList(0).expr() != null) {
                 argsCtx = ctx.argumentList(0).expr();
             }
             
@@ -367,8 +397,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
                 if (argType.name.equals("string")) {
                     String globalVar = createGlobalString(argVal);
-                    int slashNCount = (argVal.length() - argVal.replace("\\n", "").length()) / 2;
-                    int size = argVal.length() - slashNCount + 1;
+                    int size = argVal.length() - 2 + 1; 
                     String strPtr = "getelementptr inbounds ([" + size + " x i8], [" + size + " x i8]* " + globalVar + ", i64 0, i64 0)";
                     argsLLVM.append("i8* ").append(strPtr);
                 } else {
@@ -389,7 +418,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             return new Type(funcSymbol.type.name, callReg);
         }
 
-        // 3. Struct Member Access
+        // 3. Acesso a Membro de Struct / Union
         if (!ctx.ID().isEmpty()) {
             String memberName = ctx.ID(0).getText();
             boolean originalLHS = this.isProcessingLHS;
@@ -400,7 +429,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             String primaryName = ctx.primary().getText();
 
             if (primaryType.members == null) {
-                System.err.println("ERROR: '" + primaryName + "' is not a struct.");
+                System.err.println("ERROR: '" + primaryName + "' is not a struct/union.");
                 return new Type("error");
             }
             
@@ -412,16 +441,20 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
             String structPtr = primaryType.value.toString();
             String structLLVMType = toLLVMType(primaryType);
-            int fieldIndex = member.memoryIndex;
+            String fieldLLVMType = toLLVMType(member.type);
             String ptrMember = nextTemp();
             
-            emit("  " + ptrMember + " = getelementptr inbounds " + structLLVMType + ", " + structLLVMType + "* " + structPtr + ", i32 0, i32 " + fieldIndex);
+            if (primaryType.name.startsWith("union")) {
+                emit("  " + ptrMember + " = bitcast " + structLLVMType + "* " + structPtr + " to " + fieldLLVMType + "*");
+            } else {
+                int fieldIndex = member.memoryIndex;
+                emit("  " + ptrMember + " = getelementptr inbounds " + structLLVMType + ", " + structLLVMType + "* " + structPtr + ", i32 0, i32 " + fieldIndex);
+            }
 
             if (originalLHS) {
                 return new Type(member.type.name, ptrMember);
             } 
             else {
-                String fieldLLVMType = toLLVMType(member.type);
                 String valReg = nextTemp();
                 emit("  " + valReg + " = load " + fieldLLVMType + ", " + fieldLLVMType + "* " + ptrMember);
                 return new Type(member.type.name, valReg);
@@ -465,6 +498,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             return new Type("int", ctx.INT().getText());
         } else if (ctx.FLOAT() != null) {
             return new Type("float", ctx.FLOAT().getText());
+        } else if (ctx.CHAR() != null) {
+            // --- CORREÇÃO: Tratamento de CHAR ---
+            String text = ctx.CHAR().getText(); // Ex: 'A'
+            char c = text.charAt(1);            // Pega o A
+            int ascii = (int) c;                // Converte para 65
+            return new Type("char", String.valueOf(ascii));
+            // ------------------------------------
         } else if (ctx.STRING() != null) {
             String textoOriginal = ctx.STRING().getText();
             String textoLimpo = textoOriginal.substring(1, textoOriginal.length() - 1);
@@ -475,7 +515,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         
         return visitChildren(ctx);
     }
-
+    
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
         Type result = visit(ctx.multiplicativeExpr(0));
