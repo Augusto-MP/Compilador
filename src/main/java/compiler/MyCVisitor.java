@@ -386,11 +386,16 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
                 if (argType.name.equals("string")) {
                     String globalVar = createGlobalString(argVal);
-                    // --- CORREÇÃO: Usar o tamanho armazenado no mapa ---
                     int size = globalStringLengths.get(globalVar); 
                     String strPtr = "getelementptr inbounds ([" + size + " x i8], [" + size + " x i8]* " + globalVar + ", i64 0, i64 0)";
                     argsLLVM.append("i8* ").append(strPtr);
-                } else {
+                }
+                else if (funcName.equals("printf") && argType.name.equals("float")) {
+                    String doubleReg = nextTemp();
+                    emit("  " + doubleReg + " = fpext float " + argVal + " to double");
+                    argsLLVM.append("double ").append(doubleReg); 
+                }
+                else {
                     argsLLVM.append(llvmType).append(" ").append(argVal);
                 }
             }

@@ -108,224 +108,226 @@ entry:
   %t2 = load i32, i32* %x_ptr
   %t3 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str3, i64 0, i64 0), i32 %t2)
   %t4 = load float, float* %y_ptr
-  %t5 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([31 x i8], [31 x i8]* @.str4, i64 0, i64 0), float %t4)
-  %t6 = load i8, i8* %c_ptr
-  %t7 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str5, i64 0, i64 0), i8 %t6)
+  %t5 = fpext float %t4 to double
+  %t6 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([31 x i8], [31 x i8]* @.str4, i64 0, i64 0), double %t5)
+  %t7 = load i8, i8* %c_ptr
+  %t8 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str5, i64 0, i64 0), i8 %t7)
   %arr_ptr = alloca [5 x i32]
-  %t8 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 0
-  store i32 10, i32* %t8
-  %t9 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 1
-  store i32 20, i32* %t9
-  %t10 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 0
-  %t11 = load i32, i32* %t10
-  %t12 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 1
-  %t13 = load i32, i32* %t12
-  %t14 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([48 x i8], [48 x i8]* @.str6, i64 0, i64 0), i32 %t11, i32 %t13)
-  %t15 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([36 x i8], [36 x i8]* @.str7, i64 0, i64 0))
-  %t16 = load i32, i32* %x_ptr
-  %t17 = add i32 %t16, 5
-  %t18 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str8, i64 0, i64 0), i32 %t17)
-  %t19 = load i32, i32* %x_ptr
-  %t20 = sub i32 %t19, 5
-  %t21 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([26 x i8], [26 x i8]* @.str9, i64 0, i64 0), i32 %t20)
-  %t22 = load i32, i32* %x_ptr
-  %t23 = mul i32 %t22, 2
-  %t24 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str10, i64 0, i64 0), i32 %t23)
-  %t25 = load i32, i32* %x_ptr
-  %t26 = sdiv i32 %t25, 2
-  %t27 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([24 x i8], [24 x i8]* @.str11, i64 0, i64 0), i32 %t26)
-  %t28 = load i32, i32* %x_ptr
-  %t29 = srem i32 %t28, 3
-  %t30 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([37 x i8], [37 x i8]* @.str12, i64 0, i64 0), i32 %t29)
-  %t31 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([49 x i8], [49 x i8]* @.str13, i64 0, i64 0))
-  %t32 = load i32, i32* %x_ptr
-  %t33 = icmp sgt i32 %t32, 5
-  %t34 = zext i1 %t33 to i32
-  %t35 = load i32, i32* %x_ptr
-  %t36 = icmp slt i32 %t35, 20
-  %t37 = zext i1 %t36 to i32
-  %t38 = icmp ne i32 %t34, 0
-  %t39 = icmp ne i32 %t37, 0
-  %t40 = and i1 %t38, %t39
-  %t41 = zext i1 %t40 to i32
-  %t42 = icmp ne i32 %t41, 0
-  br i1 %t42, label %L43, label %L45
-L43:
-  %t46 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([49 x i8], [49 x i8]* @.str14, i64 0, i64 0))
-  br label %L45
-L45:
-  %t47 = load i32, i32* %x_ptr
-  %t48 = icmp eq i32 %t47, 10
-  %t49 = zext i1 %t48 to i32
-  %t50 = load i32, i32* %x_ptr
-  %t51 = icmp eq i32 %t50, 999
-  %t52 = zext i1 %t51 to i32
-  %t53 = icmp ne i32 %t49, 0
-  %t54 = icmp ne i32 %t52, 0
-  %t55 = or i1 %t53, %t54
-  %t56 = zext i1 %t55 to i32
-  %t57 = icmp ne i32 %t56, 0
-  br i1 %t57, label %L58, label %L60
-L58:
-  %t61 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([55 x i8], [55 x i8]* @.str15, i64 0, i64 0))
-  br label %L60
-L60:
-  %t62 = load i32, i32* %x_ptr
-  %t63 = icmp eq i32 %t62, 0
-  %t64 = zext i1 %t63 to i32
-  %t65 = icmp eq i32 %t64, 0
-  %t66 = zext i1 %t65 to i32
-  %t67 = icmp ne i32 %t66, 0
-  br i1 %t67, label %L68, label %L70
-L68:
-  %t71 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([45 x i8], [45 x i8]* @.str16, i64 0, i64 0))
-  br label %L70
-L70:
-  %t72 = load i32, i32* %x_ptr
-  %t73 = icmp ne i32 %t72, 10
-  %t74 = zext i1 %t73 to i32
-  %t75 = icmp ne i32 %t74, 0
-  br i1 %t75, label %L76, label %L77
-L76:
-  %t79 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([52 x i8], [52 x i8]* @.str17, i64 0, i64 0))
-  br label %L78
+  %t9 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 0
+  store i32 10, i32* %t9
+  %t10 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 1
+  store i32 20, i32* %t10
+  %t11 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 0
+  %t12 = load i32, i32* %t11
+  %t13 = getelementptr inbounds [5 x i32], [5 x i32]* %arr_ptr, i32 0, i32 1
+  %t14 = load i32, i32* %t13
+  %t15 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([48 x i8], [48 x i8]* @.str6, i64 0, i64 0), i32 %t12, i32 %t14)
+  %t16 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([36 x i8], [36 x i8]* @.str7, i64 0, i64 0))
+  %t17 = load i32, i32* %x_ptr
+  %t18 = add i32 %t17, 5
+  %t19 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str8, i64 0, i64 0), i32 %t18)
+  %t20 = load i32, i32* %x_ptr
+  %t21 = sub i32 %t20, 5
+  %t22 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([26 x i8], [26 x i8]* @.str9, i64 0, i64 0), i32 %t21)
+  %t23 = load i32, i32* %x_ptr
+  %t24 = mul i32 %t23, 2
+  %t25 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str10, i64 0, i64 0), i32 %t24)
+  %t26 = load i32, i32* %x_ptr
+  %t27 = sdiv i32 %t26, 2
+  %t28 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([24 x i8], [24 x i8]* @.str11, i64 0, i64 0), i32 %t27)
+  %t29 = load i32, i32* %x_ptr
+  %t30 = srem i32 %t29, 3
+  %t31 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([37 x i8], [37 x i8]* @.str12, i64 0, i64 0), i32 %t30)
+  %t32 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([49 x i8], [49 x i8]* @.str13, i64 0, i64 0))
+  %t33 = load i32, i32* %x_ptr
+  %t34 = icmp sgt i32 %t33, 5
+  %t35 = zext i1 %t34 to i32
+  %t36 = load i32, i32* %x_ptr
+  %t37 = icmp slt i32 %t36, 20
+  %t38 = zext i1 %t37 to i32
+  %t39 = icmp ne i32 %t35, 0
+  %t40 = icmp ne i32 %t38, 0
+  %t41 = and i1 %t39, %t40
+  %t42 = zext i1 %t41 to i32
+  %t43 = icmp ne i32 %t42, 0
+  br i1 %t43, label %L44, label %L46
+L44:
+  %t47 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([49 x i8], [49 x i8]* @.str14, i64 0, i64 0))
+  br label %L46
+L46:
+  %t48 = load i32, i32* %x_ptr
+  %t49 = icmp eq i32 %t48, 10
+  %t50 = zext i1 %t49 to i32
+  %t51 = load i32, i32* %x_ptr
+  %t52 = icmp eq i32 %t51, 999
+  %t53 = zext i1 %t52 to i32
+  %t54 = icmp ne i32 %t50, 0
+  %t55 = icmp ne i32 %t53, 0
+  %t56 = or i1 %t54, %t55
+  %t57 = zext i1 %t56 to i32
+  %t58 = icmp ne i32 %t57, 0
+  br i1 %t58, label %L59, label %L61
+L59:
+  %t62 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([55 x i8], [55 x i8]* @.str15, i64 0, i64 0))
+  br label %L61
+L61:
+  %t63 = load i32, i32* %x_ptr
+  %t64 = icmp eq i32 %t63, 0
+  %t65 = zext i1 %t64 to i32
+  %t66 = icmp eq i32 %t65, 0
+  %t67 = zext i1 %t66 to i32
+  %t68 = icmp ne i32 %t67, 0
+  br i1 %t68, label %L69, label %L71
+L69:
+  %t72 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([45 x i8], [45 x i8]* @.str16, i64 0, i64 0))
+  br label %L71
+L71:
+  %t73 = load i32, i32* %x_ptr
+  %t74 = icmp ne i32 %t73, 10
+  %t75 = zext i1 %t74 to i32
+  %t76 = icmp ne i32 %t75, 0
+  br i1 %t76, label %L77, label %L78
 L77:
-  %t80 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([41 x i8], [41 x i8]* @.str18, i64 0, i64 0))
-  br label %L78
+  %t80 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([52 x i8], [52 x i8]* @.str17, i64 0, i64 0))
+  br label %L79
 L78:
-  %t81 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([25 x i8], [25 x i8]* @.str19, i64 0, i64 0))
+  %t81 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([41 x i8], [41 x i8]* @.str18, i64 0, i64 0))
+  br label %L79
+L79:
+  %t82 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([25 x i8], [25 x i8]* @.str19, i64 0, i64 0))
   %opcao_ptr = alloca i32
   store i32 2, i32* %opcao_ptr
-  %t82 = load i32, i32* %opcao_ptr
-  switch i32 %t82, label %L87 [
-    i32 1, label %L85
-    i32 2, label %L86
+  %t83 = load i32, i32* %opcao_ptr
+  switch i32 %t83, label %L88 [
+    i32 1, label %L86
+    i32 2, label %L87
   ]
-L85:
-  %t88 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([27 x i8], [27 x i8]* @.str20, i64 0, i64 0))
-  br label %L83
-  br label %L83
 L86:
-  %t89 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str21, i64 0, i64 0))
-  br label %L83
-  br label %L83
+  %t89 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([27 x i8], [27 x i8]* @.str20, i64 0, i64 0))
+  br label %L84
+  br label %L84
 L87:
-  %t90 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str22, i64 0, i64 0))
-  br label %L83
-L83:
-  %t91 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([19 x i8], [19 x i8]* @.str23, i64 0, i64 0))
-  %t92 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([16 x i8], [16 x i8]* @.str24, i64 0, i64 0))
+  %t90 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str21, i64 0, i64 0))
+  br label %L84
+  br label %L84
+L88:
+  %t91 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str22, i64 0, i64 0))
+  br label %L84
+L84:
+  %t92 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([19 x i8], [19 x i8]* @.str23, i64 0, i64 0))
+  %t93 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([16 x i8], [16 x i8]* @.str24, i64 0, i64 0))
   %i_ptr = alloca i32
   store i32 0, i32* %i_ptr
-  br label %L93
-L93:
-  %t97 = load i32, i32* %i_ptr
-  %t98 = icmp slt i32 %t97, 3
-  %t99 = zext i1 %t98 to i32
-  %t100 = icmp ne i32 %t99, 0
-  br i1 %t100, label %L94, label %L96
+  br label %L94
 L94:
-  %t101 = load i32, i32* %i_ptr
-  %t102 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str25, i64 0, i64 0), i32 %t101)
-  br label %L95
+  %t98 = load i32, i32* %i_ptr
+  %t99 = icmp slt i32 %t98, 3
+  %t100 = zext i1 %t99 to i32
+  %t101 = icmp ne i32 %t100, 0
+  br i1 %t101, label %L95, label %L97
 L95:
-  %t103 = load i32, i32* %i_ptr
-  %t104 = add i32 %t103, 1
-  store i32 %t104, i32* %i_ptr
-  br label %L93
+  %t102 = load i32, i32* %i_ptr
+  %t103 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str25, i64 0, i64 0), i32 %t102)
+  br label %L96
 L96:
-  %t105 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([27 x i8], [27 x i8]* @.str26, i64 0, i64 0))
+  %t104 = load i32, i32* %i_ptr
+  %t105 = add i32 %t104, 1
+  store i32 %t105, i32* %i_ptr
+  br label %L94
+L97:
+  %t106 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([27 x i8], [27 x i8]* @.str26, i64 0, i64 0))
   %w_ptr = alloca i32
   store i32 3, i32* %w_ptr
-  br label %L106
-L106:
-  %t109 = load i32, i32* %w_ptr
-  %t110 = icmp sgt i32 %t109, 0
-  %t111 = zext i1 %t110 to i32
-  %t112 = icmp ne i32 %t111, 0
-  br i1 %t112, label %L107, label %L108
+  br label %L107
 L107:
-  %t113 = load i32, i32* %w_ptr
-  %t114 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str27, i64 0, i64 0), i32 %t113)
-  %t115 = load i32, i32* %w_ptr
-  %t116 = sub i32 %t115, 1
-  store i32 %t116, i32* %w_ptr
-  br label %L106
+  %t110 = load i32, i32* %w_ptr
+  %t111 = icmp sgt i32 %t110, 0
+  %t112 = zext i1 %t111 to i32
+  %t113 = icmp ne i32 %t112, 0
+  br i1 %t113, label %L108, label %L109
 L108:
-  %t117 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([29 x i8], [29 x i8]* @.str28, i64 0, i64 0))
+  %t114 = load i32, i32* %w_ptr
+  %t115 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str27, i64 0, i64 0), i32 %t114)
+  %t116 = load i32, i32* %w_ptr
+  %t117 = sub i32 %t116, 1
+  store i32 %t117, i32* %w_ptr
+  br label %L107
+L109:
+  %t118 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([29 x i8], [29 x i8]* @.str28, i64 0, i64 0))
   %d_ptr = alloca i32
   store i32 0, i32* %d_ptr
-  br label %L118
-L118:
-  %t121 = load i32, i32* %d_ptr
-  %t122 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str29, i64 0, i64 0), i32 %t121)
   br label %L119
 L119:
-  %t123 = load i32, i32* %d_ptr
-  %t124 = icmp sgt i32 %t123, 0
-  %t125 = zext i1 %t124 to i32
-  %t126 = icmp ne i32 %t125, 0
-  br i1 %t126, label %L118, label %L120
+  %t122 = load i32, i32* %d_ptr
+  %t123 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str29, i64 0, i64 0), i32 %t122)
+  br label %L120
 L120:
-  %t127 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([23 x i8], [23 x i8]* @.str30, i64 0, i64 0))
+  %t124 = load i32, i32* %d_ptr
+  %t125 = icmp sgt i32 %t124, 0
+  %t126 = zext i1 %t125 to i32
+  %t127 = icmp ne i32 %t126, 0
+  br i1 %t127, label %L119, label %L121
+L121:
+  %t128 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([23 x i8], [23 x i8]* @.str30, i64 0, i64 0))
   %ptr_ptr = alloca i32*
-  %t128 = load i32, i32* %x_ptr
+  %t129 = load i32, i32* %x_ptr
   store i32* %x_ptr, i32** %ptr_ptr
-  %t129 = load i32*, i32** %ptr_ptr
-  %t130 = load i32, i32* %t129
-  %t131 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([31 x i8], [31 x i8]* @.str31, i64 0, i64 0), i32 %t130)
-  %t132 = load i32*, i32** %ptr_ptr
-  store i32 100, i32* %t132
-  %t133 = load i32, i32* %x_ptr
-  %t134 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([63 x i8], [63 x i8]* @.str32, i64 0, i64 0), i32 %t133)
-  %t135 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str33, i64 0, i64 0))
+  %t130 = load i32*, i32** %ptr_ptr
+  %t131 = load i32, i32* %t130
+  %t132 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([31 x i8], [31 x i8]* @.str31, i64 0, i64 0), i32 %t131)
+  %t133 = load i32*, i32** %ptr_ptr
+  store i32 100, i32* %t133
+  %t134 = load i32, i32* %x_ptr
+  %t135 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([63 x i8], [63 x i8]* @.str32, i64 0, i64 0), i32 %t134)
+  %t136 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str33, i64 0, i64 0))
   %p_ptr = alloca %struct.Ponto
-  %t136 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 0
-  store i32 50, i32* %t136
-  %t137 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 1
-  store i32 60, i32* %t137
-  %t138 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 0
-  %t139 = load i32, i32* %t138
-  %t140 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 1
-  %t141 = load i32, i32* %t140
-  %t142 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str34, i64 0, i64 0), i32 %t139, i32 %t141)
-  %t143 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str35, i64 0, i64 0))
+  %t137 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 0
+  store i32 50, i32* %t137
+  %t138 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 1
+  store i32 60, i32* %t138
+  %t139 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 0
+  %t140 = load i32, i32* %t139
+  %t141 = getelementptr inbounds %struct.Ponto, %struct.Ponto* %p_ptr, i32 0, i32 1
+  %t142 = load i32, i32* %t141
+  %t143 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([28 x i8], [28 x i8]* @.str34, i64 0, i64 0), i32 %t140, i32 %t142)
+  %t144 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str35, i64 0, i64 0))
   call void @funcao_void()
   %res_ptr = alloca i32
-  %t144 = call i32 @soma(i32 30, i32 20)
-  store i32 %t144, i32* %res_ptr
-  %t145 = load i32, i32* %res_ptr
-  %t146 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([43 x i8], [43 x i8]* @.str36, i64 0, i64 0), i32 %t145)
+  %t145 = call i32 @soma(i32 30, i32 20)
+  store i32 %t145, i32* %res_ptr
+  %t146 = load i32, i32* %res_ptr
+  %t147 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([43 x i8], [43 x i8]* @.str36, i64 0, i64 0), i32 %t146)
   %fat_ptr = alloca i32
-  %t147 = call i32 @fatorial(i32 5)
-  store i32 %t147, i32* %fat_ptr
-  %t148 = load i32, i32* %fat_ptr
-  %t149 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([44 x i8], [44 x i8]* @.str37, i64 0, i64 0), i32 %t148)
-  %t150 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([34 x i8], [34 x i8]* @.str38, i64 0, i64 0))
-  %t151 = call i32 @puts(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str39, i64 0, i64 0))
-  %t152 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([43 x i8], [43 x i8]* @.str40, i64 0, i64 0), i32 100)
-  %t153 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([17 x i8], [17 x i8]* @.str41, i64 0, i64 0))
+  %t148 = call i32 @fatorial(i32 5)
+  store i32 %t148, i32* %fat_ptr
+  %t149 = load i32, i32* %fat_ptr
+  %t150 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([44 x i8], [44 x i8]* @.str37, i64 0, i64 0), i32 %t149)
+  %t151 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([34 x i8], [34 x i8]* @.str38, i64 0, i64 0))
+  %t152 = call i32 @puts(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str39, i64 0, i64 0))
+  %t153 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([43 x i8], [43 x i8]* @.str40, i64 0, i64 0), i32 100)
+  %t154 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([17 x i8], [17 x i8]* @.str41, i64 0, i64 0))
   %leitura_ptr = alloca i32
-  %t154 = load i32, i32* %leitura_ptr
-  %t155 = call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str42, i64 0, i64 0), i32* %leitura_ptr)
-  %t156 = load i32, i32* %leitura_ptr
-  %t157 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([16 x i8], [16 x i8]* @.str43, i64 0, i64 0), i32 %t156)
-  %t158 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str44, i64 0, i64 0))
+  %t155 = load i32, i32* %leitura_ptr
+  %t156 = call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str42, i64 0, i64 0), i32* %leitura_ptr)
+  %t157 = load i32, i32* %leitura_ptr
+  %t158 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([16 x i8], [16 x i8]* @.str43, i64 0, i64 0), i32 %t157)
+  %t159 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([21 x i8], [21 x i8]* @.str44, i64 0, i64 0))
   %u_ptr = alloca %union.Valor
-  %t159 = bitcast %union.Valor* %u_ptr to i32*
-  store i32 42, i32* %t159
   %t160 = bitcast %union.Valor* %u_ptr to i32*
-  %t161 = load i32, i32* %t160
-  %t162 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([46 x i8], [46 x i8]* @.str45, i64 0, i64 0), i32 %t161)
-  %t163 = bitcast %union.Valor* %u_ptr to float*
-  store float 0x40091EB860000000, float* %t163
+  store i32 42, i32* %t160
+  %t161 = bitcast %union.Valor* %u_ptr to i32*
+  %t162 = load i32, i32* %t161
+  %t163 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([46 x i8], [46 x i8]* @.str45, i64 0, i64 0), i32 %t162)
   %t164 = bitcast %union.Valor* %u_ptr to float*
-  %t165 = load float, float* %t164
-  %t166 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([48 x i8], [48 x i8]* @.str46, i64 0, i64 0), float %t165)
-  %t167 = bitcast %union.Valor* %u_ptr to i32*
-  %t168 = load i32, i32* %t167
-  %t169 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([69 x i8], [69 x i8]* @.str47, i64 0, i64 0), i32 %t168)
-  %t170 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([25 x i8], [25 x i8]* @.str48, i64 0, i64 0))
+  store float 0x40091EB860000000, float* %t164
+  %t165 = bitcast %union.Valor* %u_ptr to float*
+  %t166 = load float, float* %t165
+  %t167 = fpext float %t166 to double
+  %t168 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([48 x i8], [48 x i8]* @.str46, i64 0, i64 0), double %t167)
+  %t169 = bitcast %union.Valor* %u_ptr to i32*
+  %t170 = load i32, i32* %t169
+  %t171 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([69 x i8], [69 x i8]* @.str47, i64 0, i64 0), i32 %t170)
+  %t172 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([25 x i8], [25 x i8]* @.str48, i64 0, i64 0))
   ret i32 0
   ret i32 0
 }
