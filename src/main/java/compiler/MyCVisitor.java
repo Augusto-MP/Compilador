@@ -48,6 +48,42 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         llvmCode.append(code + "\n");
     }
     
+    private String toLLVMType(Type t) {
+        if (t == null) return "void";
+        
+        if (t.name.endsWith("*")) {
+            String baseTypeName = t.name.substring(0, t.name.length() - 1);
+            return toLLVMType(new Type(baseTypeName)) + "*";
+        }
+
+        if (t.name.equals("int")) return "i32";
+        if (t.name.equals("float")) return "float";
+        if (t.name.equals("void")) return "void";
+        if (t.name.equals("string") || t.name.equals("char*")) return "i8*";
+        
+        if (t.name.startsWith("struct ")) {
+            String structName = t.name.replace("struct ", "");
+            return "%struct." + structName;
+        }
+        
+        return "i32"; 
+    }
+
+    private String getTypeName(CParser.TypeContext ctx) {
+        String text = ctx.baseType().getText();
+        
+        if (ctx.baseType().getChild(0).getText().equals("struct")) {
+            text = "struct " + ctx.baseType().ID().getText();
+        }
+        
+        for (int i = 1; i < ctx.getChildCount(); i++) {
+            if (ctx.getChild(i).getText().equals("*")) {
+                text += "*";
+            }
+        }
+        return text;
+    }
+    
     public String getLLVMCode() {
         StringBuilder sb = new StringBuilder();
         for (String s : globalDefs) {
@@ -88,6 +124,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         this.tempCounter = argCount;
         
         Symbol functionSymbol = new Symbol(funcName, new Type(returnTypeStr));
+        this.currentScope.put(funcName, functionSymbol);
         Symbol oldFunction = this.currentFunction;
         this.currentFunction = functionSymbol;
 
@@ -916,39 +953,4 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return null;
     }    
 
-    private String toLLVMType(Type t) {
-        if (t == null) return "void";
-        
-        if (t.name.endsWith("*")) {
-            String baseTypeName = t.name.substring(0, t.name.length() - 1);
-            return toLLVMType(new Type(baseTypeName)) + "*";
-        }
-
-        if (t.name.equals("int")) return "i32";
-        if (t.name.equals("float")) return "float";
-        if (t.name.equals("void")) return "void";
-        if (t.name.equals("string") || t.name.equals("char*")) return "i8*";
-        
-        if (t.name.startsWith("struct ")) {
-            String structName = t.name.replace("struct ", "");
-            return "%struct." + structName;
-        }
-        
-        return "i32"; 
-    }
-
-    private String getTypeName(CParser.TypeContext ctx) {
-        String text = ctx.baseType().getText();
-        
-        if (ctx.baseType().getChild(0).getText().equals("struct")) {
-            text = "struct " + ctx.baseType().ID().getText();
-        }
-        
-        for (int i = 1; i < ctx.getChildCount(); i++) {
-            if (ctx.getChild(i).getText().equals("*")) {
-                text += "*";
-            }
-        }
-        return text;
-    }
 }
