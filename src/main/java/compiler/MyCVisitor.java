@@ -1,7 +1,8 @@
 package compiler;
 
-import java.util.ArrayList; // Precisamos de Listas agora
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Stack;
 
 import gen.CBaseVisitor;
 import gen.CParser;
@@ -15,14 +16,15 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     private int globalCounter = 0; 
     private List<String> globalDefs = new ArrayList<>();
     private Symbol currentFunction;
+    private Stack<String> breakStack = new Stack<>();
 
     private String createGlobalString(String content) {
         String name = "@.str" + (globalCounter++);
         
-        // CORREÇÃO: Substituir o literal "\n" (2 chars) pelo código hexa do LLVM "\0A"
+        // Substituir o literal "\n" (2 chars) pelo código hexa do LLVM "\0A"
         String fmt = content.replace("\\n", "\\0A");
         
-        // Calcular tamanho real: O tamanho original, menos 1 para cada \n que virou byte único
+        // Calcular tamanho real
         int originalLen = content.length(); 
         int slashNCount = (content.length() - content.replace("\\n", "").length()) / 2;
         int realLen = originalLen - slashNCount + 1; // +1 para o \00
@@ -38,6 +40,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     }
     
     private String nextTemp() {
+        // Usa prefixo 't' para evitar conflitos com numeração automática do LLVM
         return "%t" + (tempCounter++);
     }
 
@@ -47,11 +50,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     public String getLLVMCode() {
         StringBuilder sb = new StringBuilder();
-        // Globais primeiro
         for (String s : globalDefs) {
             sb.append(s).append("\n");
         }
-        // Depois o código das funções
         sb.append(llvmCode);
         return sb.toString();
     }
@@ -70,7 +71,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         
         int argCount = 0;
         if (ctx.parameterList() != null) {
-            
             for (CParser.ParameterContext param : ctx.parameterList().parameter()) {
                 String type = toLLVMType(new Type(param.type().getText()));
                 String name = param.ID().getText();
@@ -86,18 +86,15 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             }
         }
         this.tempCounter = argCount;
-        // --- CORREÇÃO: Definir a currentFunction para o return usar ---
+        
         Symbol functionSymbol = new Symbol(funcName, new Type(returnTypeStr));
-        Symbol oldFunction = this.currentFunction; // Salva a anterior (caso haja)
+        Symbol oldFunction = this.currentFunction;
         this.currentFunction = functionSymbol;
-        // -------------------------------------------------------------
 
-        // 2. Escrever o Cabeçalho
         emit("");
         emit("define " + returnTypeLLVM + " @" + funcName + "(" + paramsLLVM + ") {");
         emit("entry:"); 
 
-        // 3. Alocar memória para os parâmetros
         this.currentScope = functionScope; 
         
         for (int i = 0; i < paramNames.size(); i++) {
@@ -113,10 +110,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             s.value = ptrVar; 
         }
 
-        // 4. Visitar o corpo
         visit(ctx.block());
 
-        // 5. Garantir retorno para Void ou Main
         if (returnTypeLLVM.equals("void")) {
             emit("  ret void");
         } 
@@ -124,7 +119,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         emit("}"); 
         
         this.currentScope = this.currentScope.getParent();
-        this.currentFunction = oldFunction; // Restaura a anterior
+        this.currentFunction = oldFunction;
         return null;
     }
 
@@ -133,44 +128,36 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String structName = ctx.ID().getText();
         String typeName = "struct " + structName;
 
-        // 1. Configurar Tabela de Símbolos (Mantém lógica existente)
         Type structType = new Type(typeName);
         structType.members = new SymbolTable(null); 
         SymbolTable previousScope = this.currentScope;
         this.currentScope = structType.members;
 
-        // 2. Construir a lista de tipos do LLVM
         StringBuilder llvmBody = new StringBuilder();
         int index = 0;
 
         for (CParser.DeclarationContext decl : ctx.declaration()) {
-            // Analisa o tipo do campo
             String fieldTypeName = decl.type().getText();
-            Type fieldType = new Type(fieldTypeName); // Pode precisar de ajuste para arrays/ponteiros
+            Type fieldType = new Type(fieldTypeName);
             String llvmType = toLLVMType(fieldType);
             
             if (index > 0) llvmBody.append(", ");
             llvmBody.append(llvmType);
 
-            // Regista o campo no escopo com o seu índice
             String fieldName = decl.ID().getText();
             Symbol fieldSymbol = new Symbol(fieldName, fieldType);
-            fieldSymbol.memoryIndex = index++; // Guarda 0, 1, 2...
+            fieldSymbol.memoryIndex = index++;
             
             this.currentScope.put(fieldName, fieldSymbol);
         }
 
         this.currentScope = previousScope;
         
-        // 3. Emitir a definição global no LLVM
-        // %struct.Ponto = type { i32, i32 }
         String definition = "%struct." + structName + " = type { " + llvmBody + " }";
-        globalDefs.add(definition); // Adiciona ao topo do arquivo
+        globalDefs.add(definition);
 
-        // Regista o tipo da struct no escopo global
         this.currentScope.put(typeName, new Symbol(typeName, structType));
         
-        System.out.println("Definição LLVM registrada: " + definition);
         return null;
     }
     
@@ -179,27 +166,19 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String unionName = ctx.ID().getText();
         String typeName = "union " + unionName;
 
-        // 1. Criar o Tipo da Union e a sua tabela de membros
         Type unionType = new Type(typeName);
         unionType.members = new SymbolTable(null); 
 
-        // 2. Mudar temporariamente o escopo para capturar os membros na tabela da union
         SymbolTable previousScope = this.currentScope;
         this.currentScope = unionType.members;
 
-        // 3. Visitar as declarações dentro da union
         for (CParser.DeclarationContext decl : ctx.declaration()) {
             visit(decl);
         }
 
-        // 4. Restaurar o escopo anterior
         this.currentScope = previousScope;
-
-        // 5. Registrar a union no escopo atual (global) para uso futuro
         this.currentScope.put(typeName, new Symbol(typeName, unionType));
         
-        System.out.println("Definição de union registrada: " + typeName);
-
         return null;
     }
     
@@ -212,11 +191,11 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String llvmType = toLLVMType(typeObj);
         
         boolean isArray = !ctx.INT().isEmpty();
-        int sizeInt = 0; // Variável para guardar o tamanho capturado
+        int sizeInt = 0;
 
         if (isArray) {
             String sizeStr = ctx.INT(0).getText();
-            sizeInt = Integer.parseInt(sizeStr); // 1. Converte String para int
+            sizeInt = Integer.parseInt(sizeStr);
             llvmType = "[" + sizeStr + " x " + llvmType + "]";
         }
 
@@ -225,7 +204,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         Type varType = new Type(cTypeName + (isArray ? "[]" : ""));
         
-        // 2. Salva o tamanho no objeto Type para uso posterior (ex: no visitPostfixExpr)
         if (isArray) {
             varType.arraySize = sizeInt;
         }
@@ -236,13 +214,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         }
 
         Symbol s = new Symbol(varName, varType);
-        s.value = ptrVar; // Guardamos o endereço %..._ptr
+        s.value = ptrVar; 
         s.initialized = (ctx.expr() != null); 
         this.currentScope.put(varName, s);
 
         if (ctx.expr() != null) {
             if (isArray) {
-                System.err.println("Aviso: Inicialização de array na declaração não suportada ainda.");
+                System.err.println("WARNING: Array initialization at declaration not supported yet.");
             } else {
                 Type valType = visit(ctx.expr());
                 String valReg = valType.value.toString();
@@ -253,38 +231,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return null;
     }
     
-    
     @Override
     public Type visitAssignment(CParser.AssignmentContext ctx) {
-        // 1. Avisar que estamos no Lado Esquerdo (LHS)
-        // Isso sinaliza para o visitPrimary/Postfix retornarem o ENDEREÇO, não o valor.
-        this.isProcessingLHS = true;
-        Type lhsType = visit(ctx.unaryExpr());
-        this.isProcessingLHS = false; // Desliga imediatamente
-        
-        if (lhsType == null || lhsType.name.equals("error")) {
-            return new Type("error");
-        }
-
-        // lhsType.value contém o endereço de memória (ex: %x_ptr ou %elem_ptr)
-        String ptrVar = lhsType.value.toString(); 
-        String llvmType = toLLVMType(lhsType);
-
-        // 2. Visitar o Lado Direito (RHS) para pegar o VALOR
-        Type rhsType = visit(ctx.expr());
-        String valReg = rhsType.value.toString();
-
-        // 3. Gerar o Store
-        emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
-        
-        return rhsType;
-    }
-    
-    @Override
-    public Type visitAssignmentNoSemi(CParser.AssignmentNoSemiContext ctx) {
-        // Lógica idêntica ao visitAssignment, mas adaptada para o contexto sem ponto e vírgula
-        
-        // 1. Processa o Lado Esquerdo (LHS) para pegar o endereço
         this.isProcessingLHS = true;
         Type lhsType = visit(ctx.unaryExpr());
         this.isProcessingLHS = false;
@@ -296,11 +244,30 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String ptrVar = lhsType.value.toString(); 
         String llvmType = toLLVMType(lhsType);
 
-        // 2. Processa o Lado Direito (RHS) para pegar o valor
         Type rhsType = visit(ctx.expr());
         String valReg = rhsType.value.toString();
 
-        // 3. Gera o STORE para salvar o valor na variável
+        emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
+        
+        return rhsType;
+    }
+    
+    @Override
+    public Type visitAssignmentNoSemi(CParser.AssignmentNoSemiContext ctx) {
+        this.isProcessingLHS = true;
+        Type lhsType = visit(ctx.unaryExpr());
+        this.isProcessingLHS = false;
+        
+        if (lhsType == null || lhsType.name.equals("error")) {
+            return new Type("error");
+        }
+
+        String ptrVar = lhsType.value.toString(); 
+        String llvmType = toLLVMType(lhsType);
+
+        Type rhsType = visit(ctx.expr());
+        String valReg = rhsType.value.toString();
+
         emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
         
         return rhsType;
@@ -308,7 +275,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
-        
+        // 1. Array Access
         if (ctx.expr() != null && !ctx.expr().isEmpty()) {
             Type indexType = visit(ctx.expr(0));
             String indexVal = indexType.value.toString();
@@ -322,26 +289,29 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             String elemPtr = nextTemp();
 
             int size = arrayType.arraySize;
+            String baseTypeName = arrayType.name.replace("[]", "");
+            String llvmBaseType = toLLVMType(new Type(baseTypeName)); 
 
-            String llvmArrayType = "[" + size + " x i32]";
+            String llvmArrayType = "[" + size + " x " + llvmBaseType + "]";
 
             emit("  " + elemPtr + " = getelementptr inbounds " + llvmArrayType + ", " + llvmArrayType + "* " + arrayPtr + ", i32 0, i32 " + indexVal);
 
             if (oldLhs) {
-                return new Type("int", elemPtr);
+                return new Type(baseTypeName, elemPtr);
             } else {
                 String val = nextTemp();
-                emit("  " + val + " = load i32, i32* " + elemPtr);
-                return new Type("int", val);
+                emit("  " + val + " = load " + llvmBaseType + ", " + llvmBaseType + "* " + elemPtr);
+                return new Type(baseTypeName, val);
             }
         }
         
+        // 2. Function Call
         if (!ctx.argumentList().isEmpty()) {
             String funcName = ctx.primary().getText();
             Symbol funcSymbol = this.currentScope.get(funcName);
             
             if (funcSymbol == null) {
-                System.err.println("ERRO: Função '" + funcName + "' não declarada.");
+                System.err.println("ERROR: Function '" + funcName + "' not declared.");
                 return new Type("error");
             }
 
@@ -382,23 +352,24 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             return new Type(funcSymbol.type.name, callReg);
         }
 
+        // 3. Struct Member Access
         if (!ctx.ID().isEmpty()) {
             String memberName = ctx.ID(0).getText();
             boolean originalLHS = this.isProcessingLHS;
             this.isProcessingLHS = true;
             Type primaryType = visit(ctx.primary());
-            this.isProcessingLHS = originalLHS; // Restaura
+            this.isProcessingLHS = originalLHS; 
             
             String primaryName = ctx.primary().getText();
 
             if (primaryType.members == null) {
-                System.err.println("ERRO: '" + primaryName + "' não é struct.");
+                System.err.println("ERROR: '" + primaryName + "' is not a struct.");
                 return new Type("error");
             }
             
             Symbol member = primaryType.members.get(memberName);
             if (member == null) {
-                System.err.println("ERRO: Campo '" + memberName + "' não existe.");
+                System.err.println("ERROR: Field '" + memberName + "' does not exist.");
                 return new Type("error");
             }
 
@@ -408,7 +379,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             String ptrMember = nextTemp();
             
             emit("  " + ptrMember + " = getelementptr inbounds " + structLLVMType + ", " + structLLVMType + "* " + structPtr + ", i32 0, i32 " + fieldIndex);
-
 
             if (originalLHS) {
                 return new Type(member.type.name, ptrMember);
@@ -431,27 +401,23 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             Symbol symbol = this.currentScope.get(varName);
             
             if (symbol == null) {
-                System.err.println("ERRO SEMÂNTICO: A variável '" + varName + "' não foi declarada.");
+                System.err.println("SEMANTIC ERROR: Variable '" + varName + "' not declared.");
                 return new Type("error");
             }
 
-            // Recupera o endereço guardado no Símbolo
             String ptrVar = symbol.value.toString();
             String llvmType = toLLVMType(symbol.type);
             
-            Type t; // Vamos preparar o objeto de retorno
+            Type t; 
 
-            // Se estamos atribuindo (LHS), retornamos o endereço direto
             if (isProcessingLHS) {
                 t = new Type(symbol.type.name, ptrVar);
             } 
-            // Se estamos usando (RHS), fazemos o load
             else {
                 String tempReg = nextTemp(); 
                 emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrVar);
                 t = new Type(symbol.type.name, tempReg);
             }
-
 
             t.members = symbol.type.members; 
             t.arraySize = symbol.type.arraySize;
@@ -475,16 +441,12 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
-        // Visita o primeiro operando (ex: '10' em "10 + 5")
-        // Retorna um Type com value="%1" (se for variável) ou value="10" (se for literal)
         Type result = visit(ctx.multiplicativeExpr(0));
 
-        // Percorre o resto da expressão (ex: ... + 5 - 2)
         for (int i = 1; i < ctx.multiplicativeExpr().size(); i++) {
-            String op = ctx.getChild(2 * i - 1).getText(); // Pega o operador (+ ou -)
-            Type next = visit(ctx.multiplicativeExpr(i));  // Pega o próximo operando
+            String op = ctx.getChild(2 * i - 1).getText();
+            Type next = visit(ctx.multiplicativeExpr(i));
 
-            // Decidir a instrução LLVM baseada no tipo
             String llvmOp = "";
             String typeCode = toLLVMType(result);
             
@@ -493,17 +455,12 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             } else if (result.name.equals("float")) {
                 llvmOp = op.equals("+") ? "fadd" : "fsub";
             } else {
-                // Simplificação: ignorar strings ou erros por agora
                 return result;
             }
 
-            // Gerar novo registo temporário para o resultado
             String tempReg = nextTemp();
-            
-            // Escreve: %3 = add i32 %1, %2
             emit("  " + tempReg + " = " + llvmOp + " " + typeCode + " " + result.value + ", " + next.value);
             
-            // O resultado desta operação torna-se a base para a próxima (se houver)
             result = new Type(result.name, tempReg);
         }
         return result;
@@ -522,8 +479,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
             if (result.name.equals("int")) {
                 if (op.equals("*")) llvmOp = "mul";
-                else if (op.equals("/")) llvmOp = "sdiv"; // sdiv = signed division
-                else if (op.equals("%")) llvmOp = "srem"; // srem = signed remainder (módulo)
+                else if (op.equals("/")) llvmOp = "sdiv"; 
+                else if (op.equals("%")) llvmOp = "srem";
             } else if (result.name.equals("float")) {
                 if (op.equals("*")) llvmOp = "fmul";
                 else if (op.equals("/")) llvmOp = "fdiv";
@@ -531,8 +488,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             }
 
             String tempReg = nextTemp();
-            
-            // Escreve: %4 = mul i32 %3, %2
             emit("  " + tempReg + " = " + llvmOp + " " + typeCode + " " + result.value + ", " + next.value);
             
             result = new Type(result.name, tempReg);
@@ -551,16 +506,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             String tempReg = nextTemp();
             String instr = "";
             
-            // Seleciona a instrução correta do LLVM
             if (op.equals("<")) instr = "icmp slt";
             else if (op.equals(">")) instr = "icmp sgt";
             else if (op.equals("<=")) instr = "icmp sle";
             else if (op.equals(">=")) instr = "icmp sge";
 
-            // Gera: %3 = icmp slt i32 %1, %2
             emit("  " + tempReg + " = " + instr + " i32 " + lhs.value + ", " + rhs.value);
 
-            // Converte o resultado de 1 bit (i1) para 32 bits (i32) para o C usar
             String zextReg = nextTemp();
             emit("  " + zextReg + " = zext i1 " + tempReg + " to i32");
 
@@ -597,18 +549,15 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         for (int i = 1; i < ctx.equalityExpr().size(); i++) {
             Type rhs = visit(ctx.equalityExpr(i));
 
-            // Compara se LHS e RHS são diferentes de zero (verdadeiros)
             String t1 = nextTemp();
             emit("  " + t1 + " = icmp ne i32 " + lhs.value + ", 0");
             
             String t2 = nextTemp();
             emit("  " + t2 + " = icmp ne i32 " + rhs.value + ", 0");
 
-            // Faz o AND lógico (bit a bit em i1)
             String tAnd = nextTemp();
             emit("  " + tAnd + " = and i1 " + t1 + ", " + t2);
 
-            // Estende para i32
             String tFinal = nextTemp();
             emit("  " + tFinal + " = zext i1 " + tAnd + " to i32");
 
@@ -643,41 +592,31 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitIfStatement(CParser.IfStatementContext ctx) {
-        // 1. Avalia a expressão da condição
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
 
-        // 2. O LLVM precisa de um tipo i1 (booleano) para o desvio (br).
-        // Como nosso C usa i32, comparamos se é != 0.
         String boolReg = nextTemp();
         emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
 
-        // 3. Gera nomes únicos para os labels (usando o contador global para não repetir)
         String labelThen = "L" + (tempCounter++);
         String labelElse = "L" + (tempCounter++);
-        String labelMerge = "L" + (tempCounter++); // O ponto de encontro após o if/else
+        String labelMerge = "L" + (tempCounter++); 
 
         boolean hasElse = ctx.statement().size() > 1;
-        
-        // Se tiver else, pula para o labelElse, senão pula direto para o fim (Merge)
         String labelFalse = hasElse ? labelElse : labelMerge;
 
-        // 4. Instrução de Branch (Desvio Condicional)
         emit("  br i1 " + boolReg + ", label %" + labelThen + ", label %" + labelFalse);
 
-        // --- Bloco THEN ---
-        emit(labelThen + ":");       // Escreve o rótulo no código
-        visit(ctx.statement(0));     // Gera o código de dentro do if
-        emit("  br label %" + labelMerge); // Pula para o fim (para não cair no else)
+        emit(labelThen + ":");
+        visit(ctx.statement(0));
+        emit("  br label %" + labelMerge); 
 
-        // --- Bloco ELSE (Opcional) ---
         if (hasElse) {
             emit(labelElse + ":");
             visit(ctx.statement(1));
             emit("  br label %" + labelMerge);
         }
 
-        // --- Bloco MERGE (Fim) ---
         emit(labelMerge + ":");
 
         return null;
@@ -689,27 +628,21 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String labelBody = "L" + (tempCounter++);
         String labelEnd = "L" + (tempCounter++);
 
-        // 1. Pula para o início (onde a condição é testada)
         emit("  br label %" + labelStart);
         emit(labelStart + ":");
 
-        // 2. Avalia a condição
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
         
-        // Verifica se é verdadeiro (!= 0)
         String boolReg = nextTemp();
         emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
 
-        // 3. Se true -> entra no corpo; Se false -> vai para o fim
         emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
 
-        // 4. Corpo do While
         emit(labelBody + ":");
         visit(ctx.statement());
-        emit("  br label %" + labelStart); // O PULO DO GATO: Volta para o início!
+        emit("  br label %" + labelStart); 
 
-        // 5. Fim do loop
         emit(labelEnd + ":");
 
         return null;
@@ -721,27 +654,21 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String labelCond = "L" + (tempCounter++);
         String labelEnd = "L" + (tempCounter++);
 
-        // 1. No do-while, pulamos direto para o corpo (sem testar antes)
         emit("  br label %" + labelBody);
 
-        // 2. Corpo do Loop
         emit(labelBody + ":");
         visit(ctx.statement()); 
-        emit("  br label %" + labelCond); // Após o corpo, vai para o teste
+        emit("  br label %" + labelCond); 
 
-        // 3. Teste da Condição
         emit(labelCond + ":");
         Type condType = visit(ctx.expr());
         String condReg = condType.value.toString();
         
-        // Verifica se é verdadeiro (!= 0)
         String boolReg = nextTemp();
         emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
 
-        // 4. Se true -> volta para o corpo; Se false -> sai
         emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
 
-        // 5. Rótulo de Fim
         emit(labelEnd + ":");
 
         return null;
@@ -749,7 +676,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     @Override
     public Type visitForStatement(CParser.ForStatementContext ctx) {
-        // 1. Inicialização (executa apenas uma vez antes de tudo)
         if (ctx.forInit() != null) {
             visit(ctx.forInit());
         }
@@ -761,7 +687,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
         emit("  br label %" + labelCond);
         
-        // 2. Rótulo da Condição
         emit(labelCond + ":");
         if (ctx.forCond() != null) {
             Type condType = visit(ctx.forCond());
@@ -770,23 +695,19 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
             emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
         } else {
-            // for(;;) sem condição é um loop infinito
             emit("  br label %" + labelBody);
         }
 
-        // 3. Corpo do For
         emit(labelBody + ":");
         visit(ctx.statement());
-        emit("  br label %" + labelUpdate); // Vai para o update, não para a condição
+        emit("  br label %" + labelUpdate); 
 
-        // 4. Update (o incremento, ex: i++)
         emit(labelUpdate + ":");
         if (ctx.forUpdate() != null) {
             visit(ctx.forUpdate());
         }
-        emit("  br label %" + labelCond); // Agora sim, volta para testar a condição
+        emit("  br label %" + labelCond); 
 
-        // 5. Fim
         emit(labelEnd + ":");
 
         return null;
@@ -794,38 +715,77 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitSwitchStatement(CParser.SwitchStatementContext ctx) {
-        // 1. Avalia a expressão do switch (ex: switch(x) -> avalia x)
-        Type exprType = visit(ctx.expr());
+        Type condType = visit(ctx.expr());
+        String condReg = condType.value.toString();
         
-        if (exprType != null && !exprType.name.equals("error")) {
-            // Verifica se é um tipo inteiro válido
-            if (!exprType.name.equals("int") && !exprType.name.equals("char")) {
-                System.err.println("ERRO SEMÂNTICO: A expressão do 'switch' deve ser 'int' ou 'char', mas é '" + exprType.name + "'.");
+        String labelEnd = "L" + (tempCounter++);
+        String labelDefault = "L" + (tempCounter++); 
+        
+        breakStack.push(labelEnd);
+
+        List<String> caseValues = new ArrayList<>();
+        List<String> caseLabels = new ArrayList<>();
+        String actualDefaultLabel = labelDefault; 
+        
+        for (CParser.CaseBlockContext caseCtx : ctx.caseBlock()) {
+            String labelCase = "L" + (tempCounter++);
+            
+            if (caseCtx.expr() != null) { 
+                Type valType = visit(caseCtx.expr());
+                caseValues.add(valType.value.toString()); 
+                caseLabels.add(labelCase);
+            } else { 
+                actualDefaultLabel = labelCase;
             }
         }
 
-        // 2. Visita todos os blocos 'case' e 'default' internos
-        for (CParser.CaseBlockContext caseCtx : ctx.caseBlock()) {
-            visit(caseCtx);
+        emit("  switch i32 " + condReg + ", label %" + actualDefaultLabel + " [");
+        for (int i = 0; i < caseValues.size(); i++) {
+            emit("    i32 " + caseValues.get(i) + ", label %" + caseLabels.get(i));
         }
+        emit("  ]");
+
+        int caseIndex = 0;
+        for (CParser.CaseBlockContext caseCtx : ctx.caseBlock()) {
+            String thisLabel;
+            
+            if (caseCtx.expr() != null) {
+                thisLabel = caseLabels.get(caseIndex++);
+            } else {
+                thisLabel = actualDefaultLabel;
+            }
+            
+            emit(thisLabel + ":");
+            
+            for (CParser.StatementContext stmt : caseCtx.statement()) {
+                visit(stmt);
+            }
+            emit("  br label %" + labelEnd);
+        }
+
+        if (actualDefaultLabel.equals(labelDefault)) {
+            emit(labelDefault + ":");
+            emit("  br label %" + labelEnd);
+        }
+
+        emit(labelEnd + ":");
+        breakStack.pop(); 
+
         return null;
     }
 
     @Override
     public Type visitCaseBlock(CParser.CaseBlockContext ctx) {
-        // Se existir uma expressão (é um 'case' e não 'default')
         if (ctx.expr() != null) {
             Type caseType = visit(ctx.expr());
             
-            // O valor do case também deve ser compatível com inteiros
             if (caseType != null && !caseType.name.equals("error")) {
                 if (!caseType.name.equals("int") && !caseType.name.equals("char")) {
-                    System.err.println("ERRO SEMÂNTICO: O valor do 'case' deve ser 'int' ou 'char'.");
+                    System.err.println("SEMANTIC ERROR: Case value must be 'int' or 'char'.");
                 }
             }
         }
         
-        // Visita as instruções dentro deste case
         for (CParser.StatementContext stmt : ctx.statement()) {
             visit(stmt);
         }
@@ -833,54 +793,61 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     }
     
     @Override
+    public Type visitBreakStatement(CParser.BreakStatementContext ctx) {
+        if (!breakStack.isEmpty()) {
+            String label = breakStack.peek();
+            emit("  br label %" + label);
+        } else {
+            System.err.println("SEMANTIC ERROR: 'break' outside of loop or switch.");
+        }
+        return null;
+    }
+    
+    @Override
     public Type visitUnaryExpr(CParser.UnaryExprContext ctx) {
-        // 1. Visitar o operando primeiro (isso gera o código de LOAD se for uma variável)
-        // Ex: Para '&x', isso carrega o valor de x em %1 (o que vamos ignorar no caso do &)
         Type currentType = visit(ctx.postfixExpr());
 
-        // 2. Processar operadores da direita para a esquerda
         for (int i = ctx.getChildCount() - 2; i >= 0; i--) {
             String operator = ctx.getChild(i).getText();
             
             if (operator.equals("&")) {
-                // --- OPERADOR DE ENDEREÇO (&x) ---
-                // O 'currentType' tem o valor carregado, mas para '&' queremos o ENDEREÇO.
-                // Precisamos "espreitar" qual é a variável original para pegar o ponteiro dela.
-                
                 if (ctx.postfixExpr().primary() != null && ctx.postfixExpr().primary().ID() != null) {
                     String varName = ctx.postfixExpr().primary().ID().getText();
                     Symbol symbol = currentScope.get(varName);
                     
                     if (symbol != null) {
-                        // AQUI ESTÁ O FIX: Pegamos o endereço (%x_ptr) que está guardado no Símbolo
                         String ptrVar = symbol.value.toString();
                         currentType = new Type(currentType.name + "*", ptrVar);
                     }
                 } else {
-                     System.err.println("Erro: '&' suportado apenas para variáveis simples neste compilador.");
+                     System.err.println("ERROR: '&' operator supported only for variables.");
                 }
             } 
             else if (operator.equals("*")) {
-                // --- OPERADOR DE DESREFERÊNCIA (*ptr) ---
-                // O 'currentType' é um ponteiro (int*), e o value é o endereço (%1).
-                // Queremos ler o valor que está lá dentro.
-                
                 if (currentType.name.endsWith("*")) {
-                    // Remove o asterisco do tipo: int* -> int
                     String typeName = currentType.name.substring(0, currentType.name.length() - 1);
                     String llvmType = toLLVMType(new Type(typeName));
                     
-                    String ptrReg = currentType.value.toString(); // O endereço
-                    String tempReg = nextTemp(); // Novo registo para o valor lido
+                    String ptrReg = currentType.value.toString(); 
+                    String tempReg = nextTemp();
                     
-                    // Gera: %2 = load i32, i32* %1
                     emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrReg);
                     
-                    // Retorna o tipo base com o novo valor temporário
                     currentType = new Type(typeName, tempReg);
                 } else {
-                     System.err.println("Erro: Tentativa de usar '*' em algo que não é ponteiro.");
+                     System.err.println("ERROR: Attempt to dereference '*' a non-pointer.");
                 }
+            }
+            else if (operator.equals("!")) {
+                String valReg = currentType.value.toString();
+                
+                String tempCmp = nextTemp();
+                emit("  " + tempCmp + " = icmp eq i32 " + valReg + ", 0");
+                
+                String tempZext = nextTemp();
+                emit("  " + tempZext + " = zext i1 " + tempCmp + " to i32");
+                
+                currentType = new Type("int", tempZext);
             }
         }
         return currentType;
@@ -888,16 +855,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitReturnStatement(CParser.ReturnStatementContext ctx) {
-        // Se houver uma expressão (ex: return 0; ou return x + 1;)
         if (ctx.expr() != null) {
             Type result = visit(ctx.expr());
             String valReg = result.value.toString();
             String typeCode = toLLVMType(result);
             
-            // Gera: ret i32 %10
             emit("  ret " + typeCode + " " + valReg);
         } else {
-            // Ex: return;
             emit("  ret void");
         }
         return null;
@@ -917,19 +881,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         s.isConstant = true;
 
         this.currentScope.put(name, s);
-
-        System.out.println("   Define registrado (constante): " + name + " : " + valueType.name);
-        
         return null;
     }
 
     @Override
     public Type visitIncludeDirective(CParser.IncludeDirectiveContext ctx) {
-        // Verifica se é <stdio.h>
         if (ctx.libraryPath() != null && ctx.libraryPath().getText().equals("<stdio.h>")) {
             
-            // --- PARTE 1: Mantemos a lógica antiga para a Análise Semântica ---
-            // (Isso impede que o compilador dê erro dizendo que printf não existe)
             Type voidType = new Type("void");
             Type intType = new Type("int");
             Type stringType = new Type("string");
@@ -948,17 +906,12 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             putsParams.add(stringType);
             this.currentScope.put("puts", new Symbol("puts", voidType, putsParams));
 
-            
-            // --- PARTE 2: NOVIDADE LLVM - Geração de Código ---
-            // Escrevemos no arquivo as declarações reais que o LLVM precisa
-            emit("; --- Declarações Externas (stdio.h) ---");
+            emit("; --- External Declarations (stdio.h) ---");
             emit("declare i32 @printf(i8*, ...)");
             emit("declare i32 @scanf(i8*, ...)");
             emit("declare i32 @puts(i8*)");
             emit("declare i8* @gets(i8*)");
-            emit(""); // Linha em branco para organizar
-            
-            System.out.println("   <stdio.h> processado: Declarações LLVM geradas.");
+            emit(""); 
         }
         return null;
     }    
@@ -976,7 +929,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         if (t.name.equals("void")) return "void";
         if (t.name.equals("string") || t.name.equals("char*")) return "i8*";
         
-        // --- NOVIDADE: Structs ---
         if (t.name.startsWith("struct ")) {
             String structName = t.name.replace("struct ", "");
             return "%struct." + structName;
@@ -985,16 +937,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return "i32"; 
     }
 
-    // Método auxiliar para garantir que "struct Ponto" tenha o espaço correto
     private String getTypeName(CParser.TypeContext ctx) {
         String text = ctx.baseType().getText();
         
-        // Se for struct, forçamos o espaço: "struct" + " " + "Nome"
         if (ctx.baseType().getChild(0).getText().equals("struct")) {
             text = "struct " + ctx.baseType().ID().getText();
         }
         
-        // Adiciona os ponteiros (*) se houver
         for (int i = 1; i < ctx.getChildCount(); i++) {
             if (ctx.getChild(i).getText().equals("*")) {
                 text += "*";
