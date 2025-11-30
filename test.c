@@ -147,6 +147,10 @@ int main() {
     printf("\n--- 9. Extras (IO e Define) ---\n");
     puts("  Teste de puts(): Ola Mundo!");
     printf("  Constante via define: %d (esperado 100)\n", CONSTANTE);
+    printf("Teste de Scanf:\n");
+    int leitura;
+    scanf("%d", &leitura);
+    printf("Li o valor: %d\n", leitura);
 
     // --- 10. Unions (NOVO TESTE) ---
     printf("\n--- 10. Unions ---\n");
