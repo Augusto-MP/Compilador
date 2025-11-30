@@ -522,9 +522,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         return visitChildren(ctx);
     }
 
-    // --- Métodos de Expressões (Soma, Mult, Lógica) seguem padrão simples ---
-    // Mantive os mesmos da versão anterior, pois estavam corretos.
-    
     @Override
     public Type visitAdditiveExpr(CParser.AdditiveExprContext ctx) {
         Type result = visit(ctx.multiplicativeExpr(0));
@@ -855,19 +852,22 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitIncludeDirective(CParser.IncludeDirectiveContext ctx) {
         if (ctx.libraryPath() != null && ctx.libraryPath().getText().equals("<stdio.h>")) {
-            Type voidType = new Type("void");
             Type intType = new Type("int");
             Type stringType = new Type("string");
+
             List<Type> printfParams = new ArrayList<>();
             printfParams.add(stringType); 
             this.currentScope.put("printf", new Symbol("printf", intType, printfParams));
+            
             List<Type> scanfParams = new ArrayList<>();
             scanfParams.add(stringType);
             this.currentScope.put("scanf", new Symbol("scanf", intType, scanfParams));
             this.currentScope.put("gets", new Symbol("gets", stringType, new ArrayList<>()));
+            
             List<Type> putsParams = new ArrayList<>();
             putsParams.add(stringType);
-            this.currentScope.put("puts", new Symbol("puts", voidType, putsParams));
+            this.currentScope.put("puts", new Symbol("puts", intType, putsParams));
+            
             emit("; --- External Declarations (stdio.h) ---");
             emit("declare i32 @printf(i8*, ...)");
             emit("declare i32 @scanf(i8*, ...)");
