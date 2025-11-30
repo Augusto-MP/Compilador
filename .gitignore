@@ -24,4 +24,5 @@ replay_pid*
 
 # ANTLR VSCode extension cache
 src/main/antlr4/.antlr/
+src/main/antlr4/gen/.antlr/
 
