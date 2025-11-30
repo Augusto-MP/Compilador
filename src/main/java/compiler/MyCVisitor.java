@@ -19,8 +19,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     private List<String> globalDefs = new ArrayList<>();
     private Symbol currentFunction;
     private Stack<String> breakStack = new Stack<>();
-    
-    // --- CORREÇÃO: Mapa para armazenar tamanhos reais das strings globais ---
     private Map<String, Integer> globalStringLengths = new HashMap<>();
 
     public MyCVisitor() {
@@ -505,7 +503,13 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         } else if (ctx.INT() != null) {
             return new Type("int", ctx.INT().getText());
         } else if (ctx.FLOAT() != null) {
-            return new Type("float", ctx.FLOAT().getText());
+            // --- CORREÇÃO: Converter float para Hexadecimal do LLVM ---
+            float val = Float.parseFloat(ctx.FLOAT().getText());
+            // LLVM espera a representação hex do double para garantir precisão
+            double d = (double) val;
+            String hex = "0x" + Long.toHexString(Double.doubleToLongBits(d)).toUpperCase();
+            return new Type("float", hex);
+            // ----------------------------------------------------------
         } else if (ctx.CHAR() != null) {
             String text = ctx.CHAR().getText(); 
             char c = text.charAt(1);            
@@ -790,34 +794,61 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     @Override
     public Type visitUnaryExpr(CParser.UnaryExprContext ctx) {
         Type currentType = visit(ctx.postfixExpr());
+
         for (int i = ctx.getChildCount() - 2; i >= 0; i--) {
             String operator = ctx.getChild(i).getText();
+            
             if (operator.equals("&")) {
                 if (ctx.postfixExpr().primary() != null && ctx.postfixExpr().primary().ID() != null) {
                     String varName = ctx.postfixExpr().primary().ID().getText();
                     Symbol symbol = currentScope.get(varName);
+                    
                     if (symbol != null) {
                         String ptrVar = symbol.value.toString();
                         currentType = new Type(currentType.name + "*", ptrVar);
                     }
+                } else {
+                     System.err.println("ERROR: '&' operator supported only for variables.");
                 }
             } 
             else if (operator.equals("*")) {
                 if (currentType.name.endsWith("*")) {
                     String typeName = currentType.name.substring(0, currentType.name.length() - 1);
-                    String llvmType = toLLVMType(new Type(typeName));
+                    
+                    // --- CORREÇÃO: Lógica de Dereferência (LHS vs RHS) ---
+                    String llvmType;
+                    if (isProcessingLHS) {
+                        // LHS (*ptr = ...): Temos o endereço da variável ponteiro (i32**).
+                        // Precisamos carregar o endereço apontado (i32*).
+                        // Usamos o tipo ATUAL (int*) para o load.
+                        llvmType = toLLVMType(currentType); 
+                    } else {
+                        // RHS (x = *ptr): Temos o valor do ponteiro (i32*).
+                        // Precisamos carregar o valor final (i32).
+                        // Usamos o tipo APONTADO (int) para o load.
+                        llvmType = toLLVMType(new Type(typeName));
+                    }
+                    // -----------------------------------------------------
+                    
                     String ptrReg = currentType.value.toString(); 
                     String tempReg = nextTemp();
+                    
                     emit("  " + tempReg + " = load " + llvmType + ", " + llvmType + "* " + ptrReg);
+                    
                     currentType = new Type(typeName, tempReg);
+                } else {
+                     System.err.println("ERROR: Attempt to dereference '*' a non-pointer.");
                 }
             }
             else if (operator.equals("!")) {
                 String valReg = currentType.value.toString();
+                
                 String tempCmp = nextTemp();
                 emit("  " + tempCmp + " = icmp eq i32 " + valReg + ", 0");
+                
                 String tempZext = nextTemp();
                 emit("  " + tempZext + " = zext i1 " + tempCmp + " to i32");
+                
                 currentType = new Type("int", tempZext);
             }
         }

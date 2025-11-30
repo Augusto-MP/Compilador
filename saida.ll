@@ -102,7 +102,7 @@ entry:
   %x_ptr = alloca i32
   store i32 10, i32* %x_ptr
   %y_ptr = alloca float
-  store float 5.5, float* %y_ptr
+  store float 0x4016000000000000, float* %y_ptr
   %c_ptr = alloca i8
   store i8 65, i8* %c_ptr
   %t2 = load i32, i32* %x_ptr
@@ -274,7 +274,7 @@ L120:
   %t129 = load i32*, i32** %ptr_ptr
   %t130 = load i32, i32* %t129
   %t131 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([31 x i8], [31 x i8]* @.str31, i64 0, i64 0), i32 %t130)
-  %t132 = load i32, i32* %ptr_ptr
+  %t132 = load i32*, i32** %ptr_ptr
   store i32 100, i32* %t132
   %t133 = load i32, i32* %x_ptr
   %t134 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([63 x i8], [63 x i8]* @.str32, i64 0, i64 0), i32 %t133)
@@ -318,7 +318,7 @@ L120:
   %t161 = load i32, i32* %t160
   %t162 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([46 x i8], [46 x i8]* @.str45, i64 0, i64 0), i32 %t161)
   %t163 = bitcast %union.Valor* %u_ptr to float*
-  store float 3.14, float* %t163
+  store float 0x40091EB860000000, float* %t163
   %t164 = bitcast %union.Valor* %u_ptr to float*
   %t165 = load float, float* %t164
   %t166 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([48 x i8], [48 x i8]* @.str46, i64 0, i64 0), float %t165)
