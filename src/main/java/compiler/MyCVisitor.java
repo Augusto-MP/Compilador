@@ -281,6 +281,32 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     }
     
     @Override
+    public Type visitAssignmentNoSemi(CParser.AssignmentNoSemiContext ctx) {
+        // Lógica idêntica ao visitAssignment, mas adaptada para o contexto sem ponto e vírgula
+        
+        // 1. Processa o Lado Esquerdo (LHS) para pegar o endereço
+        this.isProcessingLHS = true;
+        Type lhsType = visit(ctx.unaryExpr());
+        this.isProcessingLHS = false;
+        
+        if (lhsType == null || lhsType.name.equals("error")) {
+            return new Type("error");
+        }
+
+        String ptrVar = lhsType.value.toString(); 
+        String llvmType = toLLVMType(lhsType);
+
+        // 2. Processa o Lado Direito (RHS) para pegar o valor
+        Type rhsType = visit(ctx.expr());
+        String valReg = rhsType.value.toString();
+
+        // 3. Gera o STORE para salvar o valor na variável
+        emit("  store " + llvmType + " " + valReg + ", " + llvmType + "* " + ptrVar);
+        
+        return rhsType;
+    }
+    
+    @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
         
         if (ctx.expr() != null && !ctx.expr().isEmpty()) {
