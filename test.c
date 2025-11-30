@@ -1,36 +1,53 @@
 #include <stdio.h>
 
-struct Ponto {
-    int x;
-    int y;
-};
-
 int main() {
-    // 1. Teste de Variáveis e Ponteiros
-    int a = 10;
-    int *ptr;
-    ptr = &a;
-    
-    printf("Valor de a: %d\n", a);
-    printf("Valor via ponteiro: %d\n", *ptr);
+    int i;
+    int soma;
 
-    // 2. Teste de Structs
-    struct Ponto p;
-    p.x = 100;
-    p.y = 200;
-
-    printf("Ponto original: x=%d, y=%d\n", p.x, p.y);
-
-    // 3. Teste de Ponteiro para Struct (Atribuição Indireta)
-    // Aqui testamos se o compilador calcula bem os endereços
-    p.x = *ptr; // p.x recebe 10
+    // -------------------------------------------------
+    // 1. TESTE DO FOR
+    // Objetivo: Somar números de 0 a 4.
+    // Verifica: Inicialização, Condição e Incremento.
+    // -------------------------------------------------
+    soma = 0;
+    printf("Iniciando loop FOR...\n");
     
-    printf("Ponto alterado: x=%d (esperado 10)\n", p.x);
+    for (i = 0; i < 5; i = i + 1) {
+        printf("  i = %d\n", i);
+        soma = soma + i;
+    }
+    printf("Soma total do FOR (esperado 10): %d\n\n", soma);
 
-    // 4. Teste de Matemática com Struct
-    p.y = p.x + p.y; // 10 + 200 = 210
+
+    // -------------------------------------------------
+    // 2. TESTE DO WHILE
+    // Objetivo: Contagem regressiva de 3 a 1.
+    // Verifica: Teste da condição ANTES de executar.
+    // -------------------------------------------------
+    printf("Iniciando loop WHILE...\n");
+    int j = 3;
     
-    printf("Soma final: y=%d (esperado 210)\n", p.y);
+    while (j > 0) {
+        printf("  Contagem: %d\n", j);
+        j = j - 1;
+    }
+    printf("Valor final de j (esperado 0): %d\n\n", j);
+
+
+    // -------------------------------------------------
+    // 3. TESTE DO DO-WHILE
+    // Objetivo: Executar pelo menos uma vez.
+    // Verifica: Execução do corpo e depois o teste.
+    // -------------------------------------------------
+    printf("Iniciando loop DO-WHILE...\n");
+    int k = 100; // Valor inicial que já falha na condição (k < 5)
     
+    do {
+        printf("  Executou o corpo com k = %d (mesmo a condicao sendo falsa inicialmente se fosse while)\n", k);
+        k = k + 1;
+    } while (k < 5); // Condição falsa imediatamente, mas deve ter rodado 1 vez
+    
+    printf("Fim dos testes.\n");
+
     return 0;
 }

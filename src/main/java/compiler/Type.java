@@ -4,6 +4,7 @@ public class Type {
     public String name; // ex: "int", "float", "struct Ponto"
     public SymbolTable members; 
     public Object value;
+    public int arraySize = 0; // 0 significa que não é array ou tamanho desconhecido
 
     public Type(String name) {
         this.name = name;

@@ -212,15 +212,23 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         String llvmType = toLLVMType(typeObj);
         
         boolean isArray = !ctx.INT().isEmpty();
+        int sizeInt = 0; // Variável para guardar o tamanho capturado
+
         if (isArray) {
-            String size = ctx.INT(0).getText();
-            llvmType = "[" + size + " x " + llvmType + "]";
+            String sizeStr = ctx.INT(0).getText();
+            sizeInt = Integer.parseInt(sizeStr); // 1. Converte String para int
+            llvmType = "[" + sizeStr + " x " + llvmType + "]";
         }
 
         String ptrVar = "%" + varName + "_ptr";
         emit("  " + ptrVar + " = alloca " + llvmType);
 
         Type varType = new Type(cTypeName + (isArray ? "[]" : ""));
+        
+        // 2. Salva o tamanho no objeto Type para uso posterior (ex: no visitPostfixExpr)
+        if (isArray) {
+            varType.arraySize = sizeInt;
+        }
         
         Symbol typeSymbol = this.currentScope.get(cTypeName);
         if (typeSymbol != null && typeSymbol.type.members != null) {
@@ -244,6 +252,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
         
         return null;
     }
+    
     
     @Override
     public Type visitAssignment(CParser.AssignmentContext ctx) {
@@ -273,7 +282,34 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitPostfixExpr(CParser.PostfixExprContext ctx) {
-        // 1. Chamada de Função
+        
+        if (ctx.expr() != null && !ctx.expr().isEmpty()) {
+            Type indexType = visit(ctx.expr(0));
+            String indexVal = indexType.value.toString();
+
+            boolean oldLhs = this.isProcessingLHS;
+            this.isProcessingLHS = true;
+            Type arrayType = visit(ctx.primary());
+            this.isProcessingLHS = oldLhs;
+
+            String arrayPtr = arrayType.value.toString();
+            String elemPtr = nextTemp();
+
+            int size = arrayType.arraySize;
+
+            String llvmArrayType = "[" + size + " x i32]";
+
+            emit("  " + elemPtr + " = getelementptr inbounds " + llvmArrayType + ", " + llvmArrayType + "* " + arrayPtr + ", i32 0, i32 " + indexVal);
+
+            if (oldLhs) {
+                return new Type("int", elemPtr);
+            } else {
+                String val = nextTemp();
+                emit("  " + val + " = load i32, i32* " + elemPtr);
+                return new Type("int", val);
+            }
+        }
+        
         if (!ctx.argumentList().isEmpty()) {
             String funcName = ctx.primary().getText();
             Symbol funcSymbol = this.currentScope.get(funcName);
@@ -320,13 +356,8 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             return new Type(funcSymbol.type.name, callReg);
         }
 
-        // --- NOVO BLOCO DE STRUCTS ---
-        // 2. Acesso a Membro de Struct (ex: p.x)
         if (!ctx.ID().isEmpty()) {
             String memberName = ctx.ID(0).getText();
-            
-            // Truque: Precisamos do ENDEREÇO da struct (%p_ptr), não do valor carregado.
-            // Salvamos o estado atual, forçamos LHS=true para pegar o ponteiro, e depois restauramos.
             boolean originalLHS = this.isProcessingLHS;
             this.isProcessingLHS = true;
             Type primaryType = visit(ctx.primary());
@@ -348,18 +379,14 @@ public class MyCVisitor extends CBaseVisitor<Type> {
             String structPtr = primaryType.value.toString();
             String structLLVMType = toLLVMType(primaryType);
             int fieldIndex = member.memoryIndex;
-            
             String ptrMember = nextTemp();
             
-            // Calcula o endereço do campo: %p_x = getelementptr ...
             emit("  " + ptrMember + " = getelementptr inbounds " + structLLVMType + ", " + structLLVMType + "* " + structPtr + ", i32 0, i32 " + fieldIndex);
 
-            // DECISÃO IMPORTANTE:
-            // Se estamos no lado esquerdo (p.x = 10), retornamos o endereço para o store.
+
             if (originalLHS) {
                 return new Type(member.type.name, ptrMember);
             } 
-            // Se estamos usando o valor (y = p.x), fazemos o LOAD agora.
             else {
                 String fieldLLVMType = toLLVMType(member.type);
                 String valReg = nextTemp();
@@ -367,7 +394,6 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 return new Type(member.type.name, valReg);
             }
         }
-        // -----------------------------
 
         return visitChildren(ctx);
     }
@@ -400,11 +426,9 @@ public class MyCVisitor extends CBaseVisitor<Type> {
                 t = new Type(symbol.type.name, tempReg);
             }
 
-            // --- A CORREÇÃO MÁGICA ---
-            // Temos de copiar os membros do símbolo original para o tipo temporário!
-            // Sem isto, o compilador "esquece" que esta variável é uma struct.
+
             t.members = symbol.type.members; 
-            // -------------------------
+            t.arraySize = symbol.type.arraySize;
 
             return t;
             
@@ -492,129 +516,256 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     
     @Override
     public Type visitRelationalExpr(CParser.RelationalExprContext ctx) {
-        Type lhsType = visit(ctx.additiveExpr(0));
-        if (ctx.additiveExpr().size() > 1) {
-            Type rhsType = visit(ctx.additiveExpr(1));
-            if (lhsType.name.equals("error") || rhsType.name.equals("error")) {
-                return new Type("error");
-            }
-            boolean isNumeric = (lhsType.name.equals("int") || lhsType.name.equals("float"));
-            boolean areCompatible = isNumeric && lhsType.equals(rhsType);
-            if (areCompatible) {
-                return new Type("int");
-            } else {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis para operação relacional: " + lhsType.name + " e " + rhsType.name);
-                return new Type("error");
-            }
+        Type lhs = visit(ctx.additiveExpr(0));
+        
+        for (int i = 1; i < ctx.additiveExpr().size(); i++) {
+            String op = ctx.getChild(2 * i - 1).getText(); 
+            Type rhs = visit(ctx.additiveExpr(i));
+            
+            String tempReg = nextTemp();
+            String instr = "";
+            
+            // Seleciona a instrução correta do LLVM
+            if (op.equals("<")) instr = "icmp slt";
+            else if (op.equals(">")) instr = "icmp sgt";
+            else if (op.equals("<=")) instr = "icmp sle";
+            else if (op.equals(">=")) instr = "icmp sge";
+
+            // Gera: %3 = icmp slt i32 %1, %2
+            emit("  " + tempReg + " = " + instr + " i32 " + lhs.value + ", " + rhs.value);
+
+            // Converte o resultado de 1 bit (i1) para 32 bits (i32) para o C usar
+            String zextReg = nextTemp();
+            emit("  " + zextReg + " = zext i1 " + tempReg + " to i32");
+
+            lhs = new Type("int", zextReg);
         }
-        return lhsType;
+        return lhs;
     }
 
     @Override
     public Type visitEqualityExpr(CParser.EqualityExprContext ctx) {
-        Type lhsType = visit(ctx.relationalExpr(0));
-        if (ctx.relationalExpr().size() > 1) {
-            Type rhsType = visit(ctx.relationalExpr(1));
-            if (lhsType.name.equals("error") || rhsType.name.equals("error")) {
-                return new Type("error");
-            }
-            if (lhsType.equals(rhsType)) {
-                return new Type("int");
-            } else {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis para operação de igualdade: " + lhsType.name + " e " + rhsType.name);
-                return new Type("error");
-            }
+        Type lhs = visit(ctx.relationalExpr(0));
+
+        for (int i = 1; i < ctx.relationalExpr().size(); i++) {
+            String op = ctx.getChild(2 * i - 1).getText();
+            Type rhs = visit(ctx.relationalExpr(i));
+
+            String tempReg = nextTemp();
+            String instr = op.equals("==") ? "icmp eq" : "icmp ne";
+
+            emit("  " + tempReg + " = " + instr + " i32 " + lhs.value + ", " + rhs.value);
+
+            String zextReg = nextTemp();
+            emit("  " + zextReg + " = zext i1 " + tempReg + " to i32");
+
+            lhs = new Type("int", zextReg);
         }
-        return lhsType;
+        return lhs;
     }
 
     @Override
     public Type visitLogicalAndExpr(CParser.LogicalAndExprContext ctx) {
-        Type lhsType = visit(ctx.equalityExpr(0));
-        if (ctx.equalityExpr().size() > 1) {
-            Type rhsType = visit(ctx.equalityExpr(1));
-            if (lhsType.name.equals("error") || rhsType.name.equals("error")) {
-                return new Type("error");
-            }
-            if (lhsType.name.equals("int") && rhsType.name.equals("int")) {
-                return new Type("int");
-            } else {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis para operação lógica '&&': " + lhsType.name + " e " + rhsType.name);
-                return new Type("error");
-            }
+        Type lhs = visit(ctx.equalityExpr(0));
+
+        for (int i = 1; i < ctx.equalityExpr().size(); i++) {
+            Type rhs = visit(ctx.equalityExpr(i));
+
+            // Compara se LHS e RHS são diferentes de zero (verdadeiros)
+            String t1 = nextTemp();
+            emit("  " + t1 + " = icmp ne i32 " + lhs.value + ", 0");
+            
+            String t2 = nextTemp();
+            emit("  " + t2 + " = icmp ne i32 " + rhs.value + ", 0");
+
+            // Faz o AND lógico (bit a bit em i1)
+            String tAnd = nextTemp();
+            emit("  " + tAnd + " = and i1 " + t1 + ", " + t2);
+
+            // Estende para i32
+            String tFinal = nextTemp();
+            emit("  " + tFinal + " = zext i1 " + tAnd + " to i32");
+
+            lhs = new Type("int", tFinal);
         }
-        return lhsType;
+        return lhs;
     }
 
     @Override
     public Type visitLogicalOrExpr(CParser.LogicalOrExprContext ctx) {
-        Type lhsType = visit(ctx.logicalAndExpr(0));
-        if (ctx.logicalAndExpr().size() > 1) {
-            Type rhsType = visit(ctx.logicalAndExpr(1));
-            if (lhsType.name.equals("error") || rhsType.name.equals("error")) {
-                return new Type("error");
-            }
-            if (lhsType.name.equals("int") && rhsType.name.equals("int")) {
-                return new Type("int");
-            } else {
-                System.err.println("ERRO SEMÂNTICO: Tipos incompatíveis para operação lógica '||': " + lhsType.name + " e " + rhsType.name);
-                return new Type("error");
-            }
+        Type lhs = visit(ctx.logicalAndExpr(0));
+
+        for (int i = 1; i < ctx.logicalAndExpr().size(); i++) {
+            Type rhs = visit(ctx.logicalAndExpr(i));
+
+            String t1 = nextTemp();
+            emit("  " + t1 + " = icmp ne i32 " + lhs.value + ", 0");
+            
+            String t2 = nextTemp();
+            emit("  " + t2 + " = icmp ne i32 " + rhs.value + ", 0");
+
+            String tOr = nextTemp();
+            emit("  " + tOr + " = or i1 " + t1 + ", " + t2);
+
+            String tFinal = nextTemp();
+            emit("  " + tFinal + " = zext i1 " + tOr + " to i32");
+
+            lhs = new Type("int", tFinal);
         }
-        return lhsType;
+        return lhs;
     }
 
     @Override
     public Type visitIfStatement(CParser.IfStatementContext ctx) {
-        Type conditionType = visit(ctx.expr());
-        if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
-            System.err.println("ERRO SEMÂNTICO: A condição do 'if' deve ser do tipo 'int', mas é '" + conditionType.name + "'.");
+        // 1. Avalia a expressão da condição
+        Type condType = visit(ctx.expr());
+        String condReg = condType.value.toString();
+
+        // 2. O LLVM precisa de um tipo i1 (booleano) para o desvio (br).
+        // Como nosso C usa i32, comparamos se é != 0.
+        String boolReg = nextTemp();
+        emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
+
+        // 3. Gera nomes únicos para os labels (usando o contador global para não repetir)
+        String labelThen = "L" + (tempCounter++);
+        String labelElse = "L" + (tempCounter++);
+        String labelMerge = "L" + (tempCounter++); // O ponto de encontro após o if/else
+
+        boolean hasElse = ctx.statement().size() > 1;
+        
+        // Se tiver else, pula para o labelElse, senão pula direto para o fim (Merge)
+        String labelFalse = hasElse ? labelElse : labelMerge;
+
+        // 4. Instrução de Branch (Desvio Condicional)
+        emit("  br i1 " + boolReg + ", label %" + labelThen + ", label %" + labelFalse);
+
+        // --- Bloco THEN ---
+        emit(labelThen + ":");       // Escreve o rótulo no código
+        visit(ctx.statement(0));     // Gera o código de dentro do if
+        emit("  br label %" + labelMerge); // Pula para o fim (para não cair no else)
+
+        // --- Bloco ELSE (Opcional) ---
+        if (hasElse) {
+            emit(labelElse + ":");
+            visit(ctx.statement(1));
+            emit("  br label %" + labelMerge);
         }
-        visit(ctx.statement(0)); // Visita o 'then'
-        if (ctx.statement().size() > 1) {
-            visit(ctx.statement(1)); // Visita o 'else'
-        }
+
+        // --- Bloco MERGE (Fim) ---
+        emit(labelMerge + ":");
+
         return null;
     }
 
     @Override
     public Type visitWhileStatement(CParser.WhileStatementContext ctx) {
-        Type conditionType = visit(ctx.expr());
-        if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
-            System.err.println("ERRO SEMÂNTICO: A condição do 'while' deve ser do tipo 'int', mas é '" + conditionType.name + "'.");
-        }
+        String labelStart = "L" + (tempCounter++);
+        String labelBody = "L" + (tempCounter++);
+        String labelEnd = "L" + (tempCounter++);
+
+        // 1. Pula para o início (onde a condição é testada)
+        emit("  br label %" + labelStart);
+        emit(labelStart + ":");
+
+        // 2. Avalia a condição
+        Type condType = visit(ctx.expr());
+        String condReg = condType.value.toString();
+        
+        // Verifica se é verdadeiro (!= 0)
+        String boolReg = nextTemp();
+        emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
+
+        // 3. Se true -> entra no corpo; Se false -> vai para o fim
+        emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
+
+        // 4. Corpo do While
+        emit(labelBody + ":");
         visit(ctx.statement());
+        emit("  br label %" + labelStart); // O PULO DO GATO: Volta para o início!
+
+        // 5. Fim do loop
+        emit(labelEnd + ":");
+
         return null;
     }
 
     @Override
     public Type visitDoWhileStatement(CParser.DoWhileStatementContext ctx) {
-        visit(ctx.statement());
-        Type conditionType = visit(ctx.expr());
-        if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
-            System.err.println("ERRO SEMÂNTICO: A condição do 'do-while' deve ser do tipo 'int', mas é '" + conditionType.name + "'.");
-        }
+        String labelBody = "L" + (tempCounter++);
+        String labelCond = "L" + (tempCounter++);
+        String labelEnd = "L" + (tempCounter++);
+
+        // 1. No do-while, pulamos direto para o corpo (sem testar antes)
+        emit("  br label %" + labelBody);
+
+        // 2. Corpo do Loop
+        emit(labelBody + ":");
+        visit(ctx.statement()); 
+        emit("  br label %" + labelCond); // Após o corpo, vai para o teste
+
+        // 3. Teste da Condição
+        emit(labelCond + ":");
+        Type condType = visit(ctx.expr());
+        String condReg = condType.value.toString();
+        
+        // Verifica se é verdadeiro (!= 0)
+        String boolReg = nextTemp();
+        emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
+
+        // 4. Se true -> volta para o corpo; Se false -> sai
+        emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
+
+        // 5. Rótulo de Fim
+        emit(labelEnd + ":");
+
         return null;
     }
 
     @Override
     public Type visitForStatement(CParser.ForStatementContext ctx) {
+        // 1. Inicialização (executa apenas uma vez antes de tudo)
         if (ctx.forInit() != null) {
             visit(ctx.forInit());
         }
+
+        String labelCond = "L" + (tempCounter++);
+        String labelBody = "L" + (tempCounter++);
+        String labelUpdate = "L" + (tempCounter++);
+        String labelEnd = "L" + (tempCounter++);
+
+        emit("  br label %" + labelCond);
+        
+        // 2. Rótulo da Condição
+        emit(labelCond + ":");
         if (ctx.forCond() != null) {
-            Type conditionType = visit(ctx.forCond());
-            if (conditionType != null && !conditionType.name.equals("int") && !conditionType.name.equals("error")) {
-                System.err.println("ERRO SEMÂNTICO: A condição do 'for' deve ser do tipo 'int', mas é '" + conditionType.name + "'.");
-            }
+            Type condType = visit(ctx.forCond());
+            String condReg = condType.value.toString();
+            String boolReg = nextTemp();
+            emit("  " + boolReg + " = icmp ne i32 " + condReg + ", 0");
+            emit("  br i1 " + boolReg + ", label %" + labelBody + ", label %" + labelEnd);
+        } else {
+            // for(;;) sem condição é um loop infinito
+            emit("  br label %" + labelBody);
         }
+
+        // 3. Corpo do For
+        emit(labelBody + ":");
+        visit(ctx.statement());
+        emit("  br label %" + labelUpdate); // Vai para o update, não para a condição
+
+        // 4. Update (o incremento, ex: i++)
+        emit(labelUpdate + ":");
         if (ctx.forUpdate() != null) {
             visit(ctx.forUpdate());
         }
-        visit(ctx.statement());
+        emit("  br label %" + labelCond); // Agora sim, volta para testar a condição
+
+        // 5. Fim
+        emit(labelEnd + ":");
+
         return null;
     }
-
+    
     @Override
     public Type visitSwitchStatement(CParser.SwitchStatementContext ctx) {
         // 1. Avalia a expressão do switch (ex: switch(x) -> avalia x)
