@@ -38,7 +38,7 @@ public class MyCVisitor extends CBaseVisitor<Type> {
     }
     
     private String nextTemp() {
-        return "%" + (tempCounter++);
+        return "%t" + (tempCounter++);
     }
 
     private void emit(String code) {
