@@ -28,28 +28,45 @@ public class MyCVisitor extends CBaseVisitor<Type> {
 
     private String createGlobalString(String content) {
         String name = "@.str" + (globalCounter++);
-        String fmt = content.replace("\\n", "\\0A");
+        StringBuilder sb = new StringBuilder();
+        int len = 0;
         
-        // Cálculo preciso do tamanho considerando escapes do LLVM (\0A conta como 1 char)
-        int realLen = 0;
-        for (int i = 0; i < fmt.length(); i++) {
-            if (fmt.charAt(i) == '\\' && i + 2 < fmt.length() && fmt.charAt(i+1) == '0' && fmt.charAt(i+2) == 'A') {
-                realLen++; 
-                i += 2; // Pula os caracteres do escape
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            
+            // Caso especial: \n literal no código C
+            if (c == '\\' && i + 1 < content.length() && content.charAt(i+1) == 'n') {
+                sb.append("\\0A");
+                len++;
+                i++; // Pula o 'n'
+                continue;
+            }
+            
+            // Caracteres ASCII simples (imprimíveis)
+            if (c >= 32 && c <= 126 && c != '"' && c != '\\') {
+                sb.append(c);
+                len++;
             } else {
-                realLen++;
+                // Caracteres especiais (acentos, aspas, etc) -> Converte para Hexadecimal UTF-8
+                // Ex: 'ú' vira "\C3\BA" (2 bytes)
+                byte[] bytes = new String(new char[]{c}).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                for (byte b : bytes) {
+                    sb.append(String.format("\\%02X", b));
+                    len++;
+                }
             }
         }
-        realLen += 1; // +1 para o terminador nulo \00
         
-        // Armazena o tamanho correto para uso posterior
-        globalStringLengths.put(name, realLen);
+        len += 1; // +1 para o terminador nulo \00
         
-        String def = name + " = private unnamed_addr constant [" + realLen + " x i8] c\"" + fmt + "\\00\"";
+        // Armazena o tamanho correto
+        globalStringLengths.put(name, len);
+        
+        String def = name + " = private unnamed_addr constant [" + len + " x i8] c\"" + sb.toString() + "\\00\"";
         globalDefs.add(def);
         return name;
     }
-    
+
     private String nextTemp() {
         return "%t" + (tempCounter++);
     }

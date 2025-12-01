@@ -41,7 +41,7 @@
 @.str38 = private unnamed_addr constant [34 x i8] c"\0A--- 9. Extras (IO e Define) ---\0A\00"
 @.str39 = private unnamed_addr constant [30 x i8] c"  Teste de puts(): Ola Mundo!\00"
 @.str40 = private unnamed_addr constant [43 x i8] c"  Constante via define: %d (esperado 100)\0A\00"
-@.str41 = private unnamed_addr constant [17 x i8] c"Teste de Scanf:\0A\00"
+@.str41 = private unnamed_addr constant [44 x i8] c"Teste de scanf, digite um n\C3\BAmero inteiro:\0A\00"
 @.str42 = private unnamed_addr constant [3 x i8] c"%d\00"
 @.str43 = private unnamed_addr constant [16 x i8] c"Li o valor: %d\0A\00"
 @.str44 = private unnamed_addr constant [21 x i8] c"\0A--- 10. Unions ---\0A\00"
@@ -305,7 +305,7 @@ L121:
   %t151 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([34 x i8], [34 x i8]* @.str38, i64 0, i64 0))
   %t152 = call i32 @puts(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str39, i64 0, i64 0))
   %t153 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([43 x i8], [43 x i8]* @.str40, i64 0, i64 0), i32 100)
-  %t154 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([17 x i8], [17 x i8]* @.str41, i64 0, i64 0))
+  %t154 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([44 x i8], [44 x i8]* @.str41, i64 0, i64 0))
   %leitura_ptr = alloca i32
   %t155 = load i32, i32* %leitura_ptr
   %t156 = call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str42, i64 0, i64 0), i32* %leitura_ptr)
