@@ -1,77 +1,88 @@
 # Compilador C para LLVM IR
 
-Trabalho final da disciplina de Compiladores (2025).
-Este projeto implementa um compilador para um subconjunto da linguagem C, gerando código intermediário LLVM IR (Low Level Virtual Machine Intermediate Representation).
+**Trabalho Final de Compiladores (2025)**
+**Universidade Estadual do Norte do Paraná**
 
-## Tecnologias Utilizadas
-- Linguagem de Desenvolvimento: Java 21
-- Gerador de Parser: ANTLR 4.13.1
-- Gerenciador de Dependências: Maven
-- Linguagem Alvo: LLVM IR (.ll)
+Este projeto implementa um compilador completo para um subconjunto da linguagem C, gerando código intermediário **LLVM IR** (*Low Level Virtual Machine Intermediate Representation*). O compilador foi projetado para gerar código compatível com a infraestrutura moderna do LLVM, permitindo tanto a interpretação via `lli` quanto a compilação para executáveis nativos via `clang`.
 
-## Arquitetura do Compilador
+---
 
-O projeto foi dividido em quatro etapas principais:
+## 🚀 Funcionalidades Implementadas
 
-1.  Análise Léxica e Sintática:
-    - Definição da gramática (C.g4) para reconhecer estruturas da linguagem C (variáveis, funções, laços, estruturas, etc.).
-    - Uso do ANTLR para gerar a árvore de derivação (Parse Tree).
+O compilador suporta uma ampla gama de recursos da linguagem C, com destaque para o gerenciamento correto de memória e tipos:
 
-2.  Tabela de Símbolos:
-    - Implementação de escopos aninhados (Global -> Função -> Bloco).
-    - Suporte a sombreamento de variáveis e verificação de existência.
+### 1. Tipos de Dados e Memória
+* **Tipos Primitivos:** `int`, `float` (padrão IEEE 754), `char`, `void`.
+* **Ponteiros:** Suporte completo para referenciar (`&`), desreferenciar (`*`) e aritmética básica.
+    * *Destaque:* Lógica robusta para diferenciar L-Values (endereço de escrita) de R-Values (valor de leitura) em operações como `*ptr = 100`.
+* **Structs:** Tipos compostos com alinhamento sequencial de memória.
+* **Unions:** Implementação real de compartilhamento de memória.
+    * *Técnica:* Utiliza instruções `bitcast` do LLVM para permitir que múltiplos tipos acessem o mesmo endereço base.
+* **Vetores:** Declaração e acesso indexado (ex: `arr[0]`).
+* **Escopo:** Suporte a variáveis globais (alocação estática com `@var`) e locais (alocação na pilha com `%var = alloca`).
 
-3.  Análise Semântica:
-    - Verificação de tipos incompatíveis (ex: atribuir string a int).
-    - Validação de estruturas de controle (ex: switch aceita apenas inteiros).
-    - Verificação de declaração e inicialização de variáveis.
+### 2. Controle de Fluxo
+* **Condicionais:** `if`, `else` e operadores lógicos (`&&`, `||`, `!`).
+* **Laços:** `for`, `while`, `do-while`.
+* **Seleção:** `switch` / `case` / `default`.
+* **Funções:** Declaração, chamadas com argumentos, retorno de valores e **recursividade** (ex: cálculo de Fatorial).
 
-4.  Geração de Código (Back-end):
-    - Tradução da árvore sintática para instruções lineares LLVM IR.
-    - Gerenciamento de memória com instruções alloca, load e store.
-    - Implementação de ponteiros e chamadas de função externas (printf, scanf).
+### 3. Entrada e Saída (IO)
+Integração com a biblioteca padrão C (`stdio.h`) via declarações externas no LLVM:
+* `printf`: Suporte a strings de formatação e promoção automática de tipos (ex: `float` para `double` em funções variádicas).
+* `scanf`: Leitura de dados do terminal para variáveis via ponteiros.
+* `puts`, `gets`.
 
-## Como Executar
+### 4. Pré-processador
+* `#define`: Substituição de constantes em tempo de compilação.
+* `#include`: Suporte básico para inclusão de bibliotecas (simulado).
+
+---
+
+## 🛠️ Arquitetura Técnica
+
+O projeto utiliza o padrão **Visitor** sobre a árvore sintática gerada pelo ANTLR para emitir o código LLVM.
+
+1.  **Frontend (ANTLR 4):**
+    * Gramática `C.g4` para análise léxica e sintática.
+2.  **Tabela de Símbolos:**
+    * Gerenciamento de escopos aninhados.
+    * Resolução de tipos para Structs e Unions.
+3.  **Backend (Geração de Código):**
+    * **Static Single Assignment (SSA):** Geração de registradores temporários únicos (`%t1`, `%t2`...).
+    * **Tratamento de Floats:** Conversão de literais para hexadecimal (ex: `0x40B00000` para `5.5`) para garantir precisão binária no LLVM.
+    * **Type Casting:** Uso de `zext` (zero extension) para operações lógicas e `fpext` para chamadas de função variádicas.
+
+---
+
+## 📦 Como Executar
 
 ### Pré-requisitos
-- Java JDK 21 instalado.
-- Maven instalado.
+1.  **Java JDK 21+** e **Maven** instalados.
+2.  **LLVM (Clang)** instalado e configurado no PATH do sistema.
 
-### Compilando o Projeto
-Na raiz do projeto, execute:
-```bash
+### Passo 1: Compilar o Projeto
+Na raiz do projeto, gere o arquivo `.jar` e compile as classes:
+```
+bash
 mvn clean compile
 ```
 
-## Executando o Compilador
-
-### Opção A: Windows 
-Utilize o script `compilador.bat`:
-
-```
-DOS
-.\compilador.bat <entrada.c> <saida.ll>
-```
-
-**Exemplo:**
+### Passo 2: Gerar Código Intermediário (.ll)
+Utilize o script facilitador para compilar seu arquivo C:
 ```
 DOS
 .\compilador.bat test.c saida.ll
 ```
 
-### Opção B: Direto via Maven
-Caso não utilize Windows, pode executar diretamente pelo Maven:
-
+### Passo 3: Criar Executável Nativo
+Use o clang para compilar o arquivo .ll gerado em um executável (.exe). Nota: No Windows, pode ser necessário linkar as definições legadas de stdio.
 ```
-Bash
-mvn -q exec:java -Dexec.mainClass="Main.Main" -Dexec.args="<entrada.c> <saida.ll>"
+PowerShell
+clang saida.ll -o programa.exe -llegacy_stdio_definitions
 ```
-
-**Exemplo:**
+### Passo 4: Rodar!
 ```
-Bash
-mvn -q exec:java -Dexec.mainClass="Main.Main" -Dexec.args="test.c saida.ll"
+PowerShell
+.\programa.exe
 ```
-
-### Resultado
-O resultado será um arquivo `.ll` (ex: `saida.ll`) contendo o código LLVM IR pronto para ser executado ou compilado por ferramentas LLVM (como `lli` ou `clang`).
