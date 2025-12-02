@@ -1,13 +1,12 @@
 # Compilador C para LLVM IR
 
 **Trabalho Final de Compiladores (2025)**
-**Universidade Estadual do Norte do Paraná**
 
-Este projeto implementa um compilador completo para um subconjunto da linguagem C, gerando código intermediário **LLVM IR** (*Low Level Virtual Machine Intermediate Representation*). O compilador foi projetado para gerar código compatível com a infraestrutura moderna do LLVM, permitindo tanto a interpretação via `lli` quanto a compilação para executáveis nativos via `clang`.
+Este projeto implementa um compilador completo para um subconjunto da linguagem C, gerando código intermediário **LLVM IR** (*Low Level Virtual Machine Intermediate Representation*). O compilador foi projetado para gerar código compatível com a infraestrutura do LLVM, permitindo tanto a interpretação via `lli` quanto a compilação para executáveis nativos via `clang`.
 
 ---
 
-## 🚀 Funcionalidades Implementadas
+## Funcionalidades Implementadas
 
 O compilador suporta uma ampla gama de recursos da linguagem C, com destaque para o gerenciamento correto de memória e tipos:
 
@@ -39,7 +38,7 @@ Integração com a biblioteca padrão C (`stdio.h`) via declarações externas n
 
 ---
 
-## 🛠️ Arquitetura Técnica
+## Arquitetura Técnica
 
 O projeto utiliza o padrão **Visitor** sobre a árvore sintática gerada pelo ANTLR para emitir o código LLVM.
 
@@ -55,7 +54,7 @@ O projeto utiliza o padrão **Visitor** sobre a árvore sintática gerada pelo A
 
 ---
 
-## 📦 Como Executar
+## Como Executar
 
 ### Pré-requisitos
 1.  **Java JDK 21+** e **Maven** instalados.
